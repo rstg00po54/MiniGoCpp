@@ -2,6 +2,25 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Integrated first 1-4 KataGo residual blocks in ONE FP16 Neuron graph
+
+After the vivo X300 Pro executed the actual KataGo rconv1 seven-operator residual graph successfully (mean 0.672 ms, 46,208/46,208 matched ONNX CPU, max absolute error 0.000443), the next step is to **connect consecutive normal blocks 1..4 in a single Neuron compilation**, instead of invoking them as standalone sessions.
+
+KataGo 10b's first four rconv blocks are the same normal 128-channel, 3x3 two-convolution architecture, with 7 logical Neuron ops per block (two norm scale multiplications, two bias adds with fused ReLU, two real convolutions and one residual ADD). **rconv5 is not included**, since its graph has a global-pooling branch and different shapes. The exporter builds isolated Python 3.8-compatible ONNX CPU references with the original actual network constants, mask fixed to all ones, and checks the full chained output. Both test source and packet are versioned separately so the successful original single-block test is not touched.
+
+Run:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_residual_stack.sh 2 mtk-mdla
+bash tools/bench_mediatek_katago_residual_stack.sh 4 mtk-mdla
+# Optionally compare to a single block, same new harness:
+bash tools/bench_mediatek_katago_residual_stack.sh 1 mtk-mdla
+```
+
+Expect `KATAGO_STACK_OP_SUPPORT` lines for every logical operator, then `KATAGO_STACK_COMPILE`, `KATAGO_STACK_VERIFY`, and `KATAGO_STACK_PASS` **only** if the requested fixed-device graph compiles and the final 46,208 FP16 elements agree with the original ONNX CPU chain within the explicit numerical tolerance. The output is **residual stacks/s**, not complete KataGo NN evals/s. Since these are separately run device calls, their throughput must not be compared directly with RKNN's full-model NN evals/s.
+
 ## Integrated KataGo rconv1 FP16 graph on the same MediaTek MDLA device
 
 The single-operation vivo tests now confirm:
