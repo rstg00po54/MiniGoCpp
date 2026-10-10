@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB_BIN="${ADB:-adb}"
-ADB_ARGS=("$ADB_BIN")
-if [ -n "${ADB_SERIAL:-}" ]; then ADB_ARGS+=(-s "$ADB_SERIAL"); fi
+ADB_SERIAL="$(ADB="$ADB_BIN" bash "$ROOT/tools/select_adb_device.sh" rk)"
+ADB_ARGS=("$ADB_BIN" -s "$ADB_SERIAL")
 CACHE="${RKNN_BENCH_CACHE:-$HOME/.cache/minigocpp/rknn_android}"
 MODEL="${1:-$CACHE/katago_10b_19x19.rknn}"
 WARMUP="${WARMUP:-20}"
