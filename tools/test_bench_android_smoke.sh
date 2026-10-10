@@ -11,11 +11,17 @@ case "${1:-}" in
   get-state) echo device ;;
   get-serialno) echo 10AFB21HP5002ZK ;;
   shell)
-    case "${2:-}" in
-      "getprop ro.product.cpu.abi") echo arm64-v8a ;;
-      "getprop ro.product.manufacturer") echo vivo ;;
-      *) echo 'Dimensity 9500'; echo 'mt6993' ;;
-    esac ;;
+    if [ "${2:-}" = "getprop" ]; then
+        case "${3:-}" in
+            ro.product.cpu.abi) echo arm64-v8a ;;
+            ro.product.manufacturer) echo vivo ;;
+            *) echo "" ;;
+        esac
+    else
+        # Simulate a phone with no /proc/device-tree/compatible.
+        echo 'Dimensity 9500'
+        echo 'mt6993'
+    fi ;;
   *) echo "mock adb unexpected arguments: $*" >&2; exit 1 ;;
 esac
 MOCK
