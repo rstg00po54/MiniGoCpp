@@ -21,6 +21,9 @@ on:
       - 'tools/export_katago_rconv1_block.py'
       - 'tools/neuron_katago_rconv1_android.cpp'
       - 'tools/bench_mediatek_katago_rconv1.sh'
+      - 'tools/export_katago_residual_stack.py'
+      - 'tools/neuron_katago_residual_stack_android.cpp'
+      - 'tools/bench_mediatek_katago_residual_stack.sh'
       - 'tools/neuron_katago_first_conv_android.cpp'
       - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
@@ -101,6 +104,12 @@ jobs:
           grep -Fq '"chmod 755 $REMOTE/neuron_katago_rconv1_android"' tools/bench_mediatek_katago_rconv1.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_rconv1_android.cpp -ldl -o build/neuron_android/neuron_katago_rconv1_android
           file build/neuron_android/neuron_katago_rconv1_android
+          bash -n tools/bench_mediatek_katago_residual_stack.sh
+          grep -Fq '"$ROOT/tools/export_katago_residual_stack.py"' tools/bench_mediatek_katago_residual_stack.sh
+          grep -Fq '"$ROOT/tools/neuron_katago_residual_stack_android.cpp"' tools/bench_mediatek_katago_residual_stack.sh
+          grep -Fq '"chmod 755 $REMOTE/neuron_katago_residual_stack_android"' tools/bench_mediatek_katago_residual_stack.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_residual_stack_android.cpp -ldl -o build/neuron_android/neuron_katago_residual_stack_android
+          file build/neuron_android/neuron_katago_residual_stack_android
       - name: Validate KataGo ONNX first Conv exporter on real model
         shell: bash
         run: |
@@ -158,6 +167,18 @@ jobs:
           assert magic==b"K10RB001" and (h,w,c,k)==(19,19,128,3) and len(b)==size, (magic,h,w,c,k,len(b),size)
           print("PASS real KataGo full rconv1 residual packet",len(b))
           PY
+          python tools/export_katago_residual_stack.py --model build/ort_android/10b_19x19.onnx --blocks 1 --out build/neuron_android/katago_residual_stack1.bin
+          python tools/export_katago_residual_stack.py --model build/ort_android/10b_19x19.onnx --blocks 4 --out build/neuron_android/katago_residual_stack4.bin
+          python - <<'PY'
+          import pathlib,struct
+          for n in (1,4):
+              p=pathlib.Path("build/neuron_android/katago_residual_stack{}.bin".format(n))
+              b=p.read_bytes()
+              magic,h,w,c,k,blocks=struct.unpack("<8s5I",b[:28])
+              assert magic==b"K10RS001" and (h,w,c,k,blocks)==(19,19,128,3,n)
+              assert len(b)==28+2*(h*w*c+n*(4*c+2*c*k*k*c))+4*h*w*c, len(b)
+              print("PASS Python3.8 real KataGo residual stack",n,"blocks",len(b),"bytes")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -174,4 +195,7 @@ jobs:
             build/neuron_android/neuron_residual_add_android
             build/neuron_android/neuron_katago_rconv1_android
             build/neuron_android/katago_rconv1_full.bin
+            build/neuron_android/neuron_katago_residual_stack_android
+            build/neuron_android/katago_residual_stack1.bin
+            build/neuron_android/katago_residual_stack4.bin
           if-no-files-found: ignore
