@@ -2,6 +2,22 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Native FP16 vs FP32 CONV_2D benchmark (additional test)
+
+The previous 19x19 FP32 graph with relaxed FP16 computation remains intact. A separate 9x9 3x3 convolution test now uses **native FP16 tensors** (or strict FP32 tensors), and checks MDLA/DSP op support, execution, numerical output, and mean/P50/P95:
+
+```bash
+git pull
+bash tools/bench_mediatek_conv.sh mtk-mdla fp16
+bash tools/bench_mediatek_conv.sh mtk-mdla fp32
+bash tools/bench_mediatek_conv.sh mtk-dsp fp16
+
+# Existing 19x19 FP32-relaxed probe (unchanged default):
+bash tools/bench_mediatek_conv.sh mtk-mdla
+```
+
+The 9x9 FP16/FP32 source is `tools/neuron_conv_fp16_android.cpp`, its ADB runner is `tools/bench_mediatek_conv_fp16.sh`. This graph is **not KataGo 10b**; passing MDLA compilation and inference would only establish this synthetic CONV_2D path.
+
 ## MT6993 MDLA: convolution test after FP32 ADD was rejected
 
 On vivo V2502A, Native Neuron SDK **9.2.0** enumerated `mtk-dsp` and `mtk-mdla`. For one 64-element `NEURON_ADD` graph:
