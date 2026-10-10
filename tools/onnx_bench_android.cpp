@@ -50,7 +50,7 @@ static int profileCount(const std::string& profile, const std::string& name) {
     std::ifstream file(profile);
     if (!file) return -1;
     std::string json((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    const std::regex pattern("\\"provider\\"\\s*:\\s*\\"([^\\"]+)\\"");
+    const std::regex pattern(R"re("provider"\s*:\s*"([^"]+)")re");
     int count = 0;
     for (auto i = std::sregex_iterator(json.begin(), json.end(), pattern); i != std::sregex_iterator(); ++i) {
         if ((*i)[1].str() == name) count++;
