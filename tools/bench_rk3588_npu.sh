@@ -83,6 +83,8 @@ echo "Pushing native benchmark, RKNN model and Android runtime via ADB..."
 "${ADB_ARGS[@]}" push "$BIN" "$REMOTE/rknn_bench_android"
 "${ADB_ARGS[@]}" push "$MODEL" "$REMOTE/katago_10b_19x19.rknn"
 "${ADB_ARGS[@]}" push "$CACHE/librknnrt.so" "$REMOTE/librknnrt.so"
+LIBCPP="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+if [ -s "$LIBCPP" ]; then "${ADB_ARGS[@]}" push "$LIBCPP" "$REMOTE/libc++_shared.so"; fi
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/rknn_bench_android"
 for core in 0 all; do
     echo "===== Android RK3588 NPU core=$core ====="
