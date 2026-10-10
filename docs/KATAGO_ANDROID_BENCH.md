@@ -2,6 +2,31 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Real KataGo 10b first Conv: ONNX weights on MediaTek MDLA
+
+This is the first experiment using **real KataGo 10b model weights**, not hand-made constant kernels. The exporter loads the original 19x19 `10b_19x19.onnx`, finds its first `Conv` with constant weights, adds its exact incoming tensor and result as ONNX outputs, runs the *entire original graph* on ONNX Runtime CPU to obtain that Conv's input and reference output, and exports a binary packet:
+
+- Input features and weights are converted from ONNX NCHW / OIHW FP32 to Neuron NHWC / OHWI FP16.
+- The original ONNX CPU output is stored separately as FP32 to validate actual Neuron results.
+- Bias, kernel size, padding, and tensor channel counts come from the real ONNX graph (the exporter fails rather than silently guessing incompatible Conv attributes).
+- The phone builds **one** CONV_2D graph on the named `mtk-mdla` device using native `NeuronCompilation_createForDevices`.
+- It checks per-device support, executes, verifies every element against ONNX output with explicit FP16 tolerance, and only reports timing if the output passes.
+
+Run:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_first_conv.sh mtk-mdla
+
+# Optional DSP comparison, *same real Conv*
+bash tools/bench_mediatek_katago_first_conv.sh mtk-dsp
+```
+
+Requirements: existing Android NDK 27.2.12479018, adb; the host creates a cached Python virtualenv with `onnx==1.16.2`, `onnxruntime==1.19.2`, `numpy==1.24.4` if needed. The ~12 MB ONNX model is reused from the earlier ONNX benchmark. Shell variables `RUNS`, `WARMUP`, `KATAGO_ONNX_MODEL`, `PYTHON`, `NDK`, `NEURON_TIMEOUT` can be overridden.
+
+**Do not compare** `KATAGO_FIRST_CONV_PASS conv_calls/s` to RK3588 `nnEvals/s`: the former is one genuine layer; the latter is a whole-network NN invocation. If the first Conv fails, record whether it is extraction, unsupported operation, compilation, or numerical mismatch. Passing the layer only establishes an important first step toward complete KataGo 10b execution.
+
 ## Native FP16 vs FP32 CONV_2D benchmark (additional test)
 
 The previous 19x19 FP32 graph with relaxed FP16 computation remains intact. A separate 9x9 3x3 convolution test now uses **native FP16 tensors** (or strict FP32 tensors), and checks MDLA/DSP op support, execution, numerical output, and mean/P50/P95:
