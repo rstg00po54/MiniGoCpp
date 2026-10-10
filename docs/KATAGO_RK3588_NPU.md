@@ -23,9 +23,11 @@ For a longer run:
 
 ```bash
 RUNS=500 WARMUP=50 bash tools/bench_rk3588_npu.sh
+# Recheck in reverse order to reduce thermal/frequency and test-order bias:
+CORE_MODES='all 2 1 0' RUNS=500 WARMUP=50 bash tools/bench_rk3588_npu.sh
 ```
 
-The script checks RK3588 hardware properties, automatically downloads the 19x19 10b RKNN model and Rockchip **Android** `librknnrt.so` v2.3.2, compiles `tools/rknn_bench_android.cpp` using host NDK, pushes executable + model + runtime with `adb push`, and runs two tests using `adb shell` in `/data/local/tmp/minigocpp_npu`. No Linux ARM Python wheels needed. It reports mean/P50/P95 neural network evaluation latency for core 0 and core 0+1+2. Three cores do not automatically mean 3x speed for batch=1.
+The script checks RK3588 hardware properties, automatically downloads the 19x19 10b RKNN model and Rockchip **Android** `librknnrt.so` v2.3.2, compiles `tools/rknn_bench_android.cpp` using host NDK, pushes executable + model + runtime with `adb push`, and runs four tests using `adb shell` in `/data/local/tmp/minigocpp_npu`. No Linux ARM Python wheels needed. It reports mean/P50/P95 neural network evaluation latency for core 0, 1, 2 and core 0+1+2. Three cores do not automatically mean 3x speed for batch=1.
 
 The benchmark uses **synthetic** empty-board-shaped tensors, so its timing is useful for NPU neural inference profiling but not a substitute for validating numerical accuracy or measuring KataGo MCTS visits/s. A successfully compiled `.rknn` model may still be incompatible with your installed NPU kernel driver. If `rknn_init` fails, capture the printed runtime and driver errors (and Android `logcat`).
 
