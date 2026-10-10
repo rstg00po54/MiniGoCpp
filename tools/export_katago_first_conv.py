@@ -60,7 +60,10 @@ def create_case(model_path, out_path, seed=42):
     rng = np.random.default_rng(seed)
     feeds = {}
     for inp in session.get_inputs():
-        dims = inp.shape
+        # KataGo dumponnx leaves the leading batch dimension symbolic ("batch").
+        # Our Android ADB probes always use batch=1, like the RKNN comparison.
+        dims = [1 if i == 0 and (d is None or isinstance(d, str)) else d
+                for i, d in enumerate(inp.shape)]
         if any(not isinstance(d, int) or d < 1 for d in dims):
             raise RuntimeError("Dynamic/unknown model input shape {}: {}".format(inp.name, dims))
         if inp.type != "tensor(float)":
