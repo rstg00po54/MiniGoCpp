@@ -138,6 +138,14 @@ run_all() {
                     echo "KataGo must be converted and compiled for this MediaTek backend before claiming NN evals/s."
                     error=1
                 fi ;;
+            conv)
+                if [[ "${soc,,}" == *rk3588* ]]; then
+                    echo "ERROR: MediaTek Neuron CONV_2D mode is for vivo/MTK only." >&2
+                    error=1
+                else
+                    ADB_SERIAL="$serial" ADB="$ADB" WARMUP="$WARMUP" RUNS="$RUNS" \
+                        bash "$ROOT/tools/bench_mediatek_conv.sh" "${NEURON_DEVICE_NAME:-mtk-mdla}" || error=1
+                fi ;;
             cpu|nnapi) nn_test "$m" || error=1 ;;
             gpu) gpu_test || error=1 ;;
             rknn)
@@ -148,7 +156,7 @@ run_all() {
                     CORE_MODES="${CORE_MODES:-0 1 2 all}" RUNS="$RUNS" WARMUP="$WARMUP" ADB_SERIAL="$serial" \
                         bash "$ROOT/tools/bench_rk3588_npu.sh" || error=1
                 fi ;;
-            *) echo "Unknown mode: $m (supported: auto npu probe cpu nnapi gpu rknn)" >&2; error=1 ;;
+            *) echo "Unknown mode: $m (supported: auto npu conv probe cpu nnapi gpu rknn)" >&2; error=1 ;;
         esac
     done
     echo "===== DONE ====="
