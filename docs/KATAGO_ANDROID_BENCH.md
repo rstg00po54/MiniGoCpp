@@ -4,10 +4,10 @@ One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 o
 
 ## Real KataGo 10b first Conv: ONNX weights on MediaTek MDLA
 
-This is the first experiment using **real KataGo 10b model weights**, not hand-made constant kernels. The exporter loads the original 19x19 `10b_19x19.onnx`, finds its first `Conv` with constant weights, adds its exact incoming tensor and result as ONNX outputs, runs the *entire original graph* on ONNX Runtime CPU to obtain that Conv's input and reference output, and exports a binary packet:
+This is the first experiment using **real KataGo 10b model weights**, not hand-made constant kernels. The exporter loads the original 19x19 `10b_19x19.onnx`, finds its first `Conv` with constant weights, uses the **original Conv node, tensor dimensions and FP32 weights** in a standalone opset-19/IR-9 reference graph to generate the CPU golden output (so Python 3.8 / ONNX Runtime 1.16.3 works), and exports a binary packet. The source ONNX model is left unchanged:
 
 - Input features and weights are converted from ONNX NCHW / OIHW FP32 to Neuron NHWC / OHWI FP16.
-- The original ONNX CPU output is stored separately as FP32 to validate actual Neuron results.
+- The isolated original Conv's CPU reference output is stored separately as FP32 to validate actual Neuron results; the test input is deterministic synthetic feature data.
 - Bias, kernel size, padding, and tensor channel counts come from the real ONNX graph (the exporter fails rather than silently guessing incompatible Conv attributes).
 - The phone builds **one** CONV_2D graph on the named `mtk-mdla` device using native `NeuronCompilation_createForDevices`.
 - It checks per-device support, executes, verifies every element against ONNX output with explicit FP16 tolerance, and only reports timing if the output passes.
