@@ -132,7 +132,7 @@ jobs:
           python3 -m pip install --user 'numpy==1.24.4' 'onnx==1.16.2' 'onnxruntime==1.19.2'
           curl -fL --retry 3 -o build/ort_android/10b_19x19.onnx \
             https://github.com/rstg00po54/go/releases/download/katago-10b-onnx-v1/10b_19x19.onnx
-          python3 tools/inspect_katago_onnx.py build/ort_android/10b_19x19.onnx --limit 95
+          python3 tools/inspect_katago_onnx.py build/ort_android/10b_19x19.onnx --limit 220
           python3 tools/export_katago_first_conv.py \
             --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_first_conv.bin
           python3 - <<'PY'
