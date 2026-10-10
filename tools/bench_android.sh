@@ -38,7 +38,9 @@ serial="$(adb_cmd get-serialno | tr -d '\r')"
 echo "ADB: $serial manufacturer=$brand abi=$abi SOC=$soc"
 [ "$abi" = arm64-v8a ] || { echo "ERROR: ARM64 Android only" >&2; exit 1; }
 if [ "$MODES" = auto ]; then
-    if [[ "${soc,,}" == *rk3588* ]]; then MODES="cpu nnapi rknn gpu"; else MODES="cpu nnapi gpu"; fi
+    if [[ "${soc,,}" == *rk3588* ]]; then MODES="cpu nnapi rknn gpu";
+    elif [[ "${soc,,}" == *mt[0-9]* ]] || [[ "${brand,,}" == *mediatek* ]] || [[ "${brand,,}" == *vivo* ]]; then MODES="probe cpu nnapi gpu";
+    else MODES="cpu nnapi gpu"; fi
 fi
 
 mkdir -p "$CACHE"
@@ -116,6 +118,7 @@ run_all() {
     local error=0
     for m in $MODES; do
         case "$m" in
+            probe) ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/probe_mediatek_npu.sh" || error=1 ;;
             cpu|nnapi) nn_test "$m" || error=1 ;;
             gpu) gpu_test || error=1 ;;
             rknn)
@@ -126,7 +129,7 @@ run_all() {
                     CORE_MODES="${CORE_MODES:-0 1 2 all}" RUNS="$RUNS" WARMUP="$WARMUP" ADB_SERIAL="$serial" \
                         bash "$ROOT/tools/bench_rk3588_npu.sh" || error=1
                 fi ;;
-            *) echo "Unknown mode: $m (supported: auto cpu nnapi gpu rknn)" >&2; error=1 ;;
+            *) echo "Unknown mode: $m (supported: auto probe cpu nnapi gpu rknn)" >&2; error=1 ;;
         esac
     done
     echo "===== DONE ====="
