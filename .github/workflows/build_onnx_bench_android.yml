@@ -27,6 +27,9 @@ on:
       - 'tools/export_katago_rconv5_gpool.py'
       - 'tools/neuron_katago_rconv5_gpool_android.cpp'
       - 'tools/bench_mediatek_katago_rconv5_gpool.sh'
+      - 'tools/export_katago_neuron_full.py'
+      - 'tools/neuron_katago_full_android.cpp'
+      - 'tools/bench_mediatek_katago_full.sh'
       - 'tools/neuron_katago_first_conv_android.cpp'
       - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
@@ -125,6 +128,11 @@ jobs:
           grep -Fq '"$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_rconv5_gpool_android.cpp" -ldl -o "$BIN"' tools/bench_mediatek_katago_rconv5_gpool.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_rconv5_gpool_android.cpp -ldl -o build/neuron_android/neuron_katago_rconv5_gpool_android
           file build/neuron_android/neuron_katago_rconv5_gpool_android
+          bash -n tools/bench_mediatek_katago_full.sh
+          grep -Fq '"$ROOT/tools/export_katago_neuron_full.py"' tools/bench_mediatek_katago_full.sh
+          grep -Fq '"$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_full_android.cpp" -ldl -o "$BIN"' tools/bench_mediatek_katago_full.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_full_android.cpp -ldl -o build/neuron_android/neuron_katago_full_android
+          file build/neuron_android/neuron_katago_full_android
       - name: Validate KataGo ONNX first Conv exporter on real model
         shell: bash
         run: |
@@ -205,6 +213,16 @@ jobs:
           assert len(contents)==expected, (len(contents),expected)
           print("PASS KataGo actual global pooling w1r ONNX packet",len(contents))
           PY
+          python tools/export_katago_neuron_full.py --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_full_neuron.bin
+          python - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path("build/neuron_android/katago_full_neuron.bin")
+          b=p.read_bytes()
+          magic,operands,operations,inputs,outputs=struct.unpack("<8s4I",b[:24])
+          assert magic==b"K10NW001" and operands>100 and operations>100 and inputs==2 and outputs==5
+          assert 1000000<len(b)<100000000
+          print("PASS original complete KataGo 10b Neuron graph packet:",operands,"operands",operations,"ops",len(b),"bytes")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -226,4 +244,6 @@ jobs:
             build/neuron_android/katago_residual_stack4.bin
             build/neuron_android/neuron_katago_rconv5_gpool_android
             build/neuron_android/katago_rconv5_gpool.bin
+            build/neuron_android/neuron_katago_full_android
+            build/neuron_android/katago_full_neuron.bin
           if-no-files-found: ignore
