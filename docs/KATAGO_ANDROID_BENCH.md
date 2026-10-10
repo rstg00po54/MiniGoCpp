@@ -2,6 +2,21 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## MediaTek MT6993: what the NNAPI result means
+
+Observed on vivo X300 Pro / MT6993 (Android): only `NNAPI[0]: nnapi-reference type=CPU` is enumerated and the ONNX Runtime profile reports `NNAPI_nodes=0`. This means standard NNAPI did **not** use an accelerator in that test. The `nnapi` runtime result is CPU fallback, not a MediaTek NPU measurement. Profiling overhead differs from the unprofiled CPU mode, so the two latency figures are not a tightly controlled CPU-vs-CPU performance comparison.
+
+To inspect whether MediaTek Neuron/NeuroPilot components have visible libraries on the phone:
+
+```bash
+git pull
+bash tools/bench_android.sh probe
+```
+
+The probe uses `adb shell` to list public file names matching Neuron/APU libraries under standard Android partitions without root. Presence of libraries is **not proof that an ordinary app or ADB shell can load them**, or that the chip can run the given KataGo graph. The `auto` mode runs this probe on vivo/MediaTek devices before CPU/NNAPI/GPU tests.
+
+MediaTek's dedicated NPU route involves **Neuron Adapter / Neuron Delegate / NeuroPilot**, generally with a supported TFLite model and appropriate vendor toolchain/runtime. ONNX Runtime's stock NNAPI execution provider is not the same as a MediaTek-specific acceleration execution provider. A working NPU test requires vendor-compatible conversion and an accessible runtime; until then this project does not claim native MT6993 NPU speed.
+
 ## Quick start
 
 ```bash
