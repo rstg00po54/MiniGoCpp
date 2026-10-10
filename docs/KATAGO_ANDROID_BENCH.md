@@ -23,7 +23,7 @@ bash tools/bench_mediatek_katago_first_conv.sh mtk-mdla
 bash tools/bench_mediatek_katago_first_conv.sh mtk-dsp
 ```
 
-Requirements: existing Android NDK 27.2.12479018, adb; the host creates a cached Python virtualenv with `onnx==1.16.2`, `onnxruntime==1.19.2`, `numpy==1.24.4` if needed. The ~12 MB ONNX model is reused from the earlier ONNX benchmark. Shell variables `RUNS`, `WARMUP`, `KATAGO_ONNX_MODEL`, `PYTHON`, `NDK`, `NEURON_TIMEOUT` can be overridden.
+Requirements: existing Android NDK 27.2.12479018, adb; the host creates a cached Python virtualenv with `onnx==1.16.2`, `numpy==1.24.4`, and a Python-compatible ONNX Runtime (`1.16.3` for Python 3.8, `1.19.2` for Python 3.9+) if needed. The ~12 MB ONNX model is reused from the earlier ONNX benchmark. Shell variables `RUNS`, `WARMUP`, `KATAGO_ONNX_MODEL`, `PYTHON`, `NDK`, `NEURON_TIMEOUT` can be overridden.
 
 **Do not compare** `KATAGO_FIRST_CONV_PASS conv_calls/s` to RK3588 `nnEvals/s`: the former is one genuine layer; the latter is a whole-network NN invocation. If the first Conv fails, record whether it is extraction, unsupported operation, compilation, or numerical mismatch. Passing the layer only establishes an important first step toward complete KataGo 10b execution.
 
