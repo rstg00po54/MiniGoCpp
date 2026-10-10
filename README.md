@@ -205,3 +205,13 @@ bash tools/bench_android.sh rknn
 
 **注意：** RKNN 和 ONNX Runtime CPU/NNAPI 给出 *NN-only* 的 `nnEvals/s`；GPU 现有脚本给出包含 MCTS 的 `visits/s`，二者不能直接比较。NNAPI 是候选硬件加速路径，不等同于联发科 NPU；测试工具将报告 NNAPI 节点是否实际参与执行，未验证驱动分配前不能声称测试到了手机 NPU。
 
+
+### ADB 多设备自动选择（vivo 手机 / RK3588）
+
+```bash
+bash tools/bench_android.sh vivo        # vivo：检查 NeuroPilot NPU 接入情况，不伪造性能成绩
+bash tools/bench_android.sh vivo cpu nnapi  # 手机 CPU/NNAPI 推理，NNAPI 未必是 NPU
+bash tools/bench_android.sh rk          # RK3588：自动运行 RKNN NPU 测速
+```
+
+通过制造商和 SoC 属性识别连接的设备，不依赖 ADB 列表顺序。如有相同机型的多个连接，可使用 `ADB_SERIAL=设备序列号` 强制选择。**vivo NPU 模式目前是能力检查，不是已经实现的联发科 Neuron 推理测试**；详见 [Android 测试说明](docs/KATAGO_ANDROID_BENCH.md)。
