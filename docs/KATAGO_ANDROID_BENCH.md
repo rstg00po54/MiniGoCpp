@@ -2,6 +2,27 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Vivo X300 Pro 4-block result and genuine rconv5 global pooling
+
+The real vivo X300 Pro (MT6993, Neuron SDK 9.2.0, `mtk-mdla` pinned) executed the original KataGo 10b first 2 and 4 residual blocks as one native FP16 Neuron graph on a 19x19 full-board input:
+
+| Original 10b residual blocks | Ops | Device compile | Average | P50 | P95 | Max abs error vs ONNX CPU | Mean abs error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rconv1..rconv2 | 14 | 246.427 ms | 0.728 ms | 0.627 ms | 1.299 ms | 0.000664 | 0.000034 |
+| rconv1..rconv4 | 28 | 333.155 ms | 0.917 ms | 0.838 ms | 1.578 ms | 0.000731 | 0.000055 |
+
+Both matched **46,208/46,208** fp16 output values within the test's documented error threshold. These are real KataGo blocks but not full-model NN evals/s.
+
+The next qualitatively different layer is `rconv5`'s global pooling: compute spatial mean/max of 32 channels, multiply mean by the actual `InputMask/scale` parameter, concatenate three 32-channel vectors into a 96-channel 1x1 tensor and apply **original KataGo `rconv5/w1r` 96-to-96 1x1 Conv**. The exporter uses actual upstream 10b ONNX operations and FP32 reference outputs and verifies that all-ones mask allows this reduced mean/max formulation.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_rconv5_gpool.sh mtk-mdla
+```
+
+This test prints `KATAGO_GPOOL_OP_SUPPORT` for MEAN, MUL, REDUCE_MAX, CONCAT, and 1x1 CONV; only if all are supported can the device-pinned compile and numerical validation run. **It is not the entire rconv5 block**, and if unsupported, that single operator's output helps decide whether the original KataGo model needs a hybrid execution path or a different pooling representation.
+
 ## Integrated first 1-4 KataGo residual blocks in ONE FP16 Neuron graph
 
 After the vivo X300 Pro executed the actual KataGo rconv1 seven-operator residual graph successfully (mean 0.672 ms, 46,208/46,208 matched ONNX CPU, max absolute error 0.000443), the next step is to **connect consecutive normal blocks 1..4 in a single Neuron compilation**, instead of invoking them as standalone sessions.
