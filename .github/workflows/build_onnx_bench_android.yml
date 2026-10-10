@@ -71,6 +71,9 @@ jobs:
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_conv_android.cpp -ldl -o build/neuron_android/neuron_conv_android
           file build/neuron_android/neuron_conv_android
           bash -n tools/bench_mediatek_conv_fp16.sh
+          grep -Fq '"$ROOT/tools/neuron_conv_fp16_android.cpp"' tools/bench_mediatek_conv_fp16.sh
+          grep -Fq '"$REMOTE/neuron_conv_fp16_android"' tools/bench_mediatek_conv_fp16.sh
+          grep -Fq '"chmod 755 $REMOTE/neuron_conv_fp16_android"' tools/bench_mediatek_conv_fp16.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_conv_fp16_android.cpp -ldl -o build/neuron_android/neuron_conv_fp16_android
           file build/neuron_android/neuron_conv_fp16_android
       - uses: actions/upload-artifact@v4
