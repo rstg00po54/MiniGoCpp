@@ -3,6 +3,15 @@
 # This is NOT the full KataGo neural network.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Optional second argument selects native FP16/FP32 test (9x9).
+# One-argument calls preserve the existing 19x19 FP32-relaxed benchmark.
+if [ "${2:-}" = "fp16" ] || [ "${2:-}" = "fp32" ]; then
+    exec bash "$ROOT/tools/bench_mediatek_conv_fp16.sh" "$@"
+fi
+if [ "$#" -gt 1 ]; then
+    echo "ERROR: usage: bash tools/bench_mediatek_conv.sh [mtk-mdla|mtk-dsp] [fp16|fp32]" >&2
+    exit 2
+fi
 ADB="${ADB:-adb}"
 ADB_SERIAL="$(ADB="$ADB" bash "$ROOT/tools/select_adb_device.sh" vivo)"
 ADB_ARGS=("$ADB" -s "$ADB_SERIAL")
