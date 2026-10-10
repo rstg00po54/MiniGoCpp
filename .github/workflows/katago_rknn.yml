@@ -1,0 +1,88 @@
+name: Build KataGo RK3588 RKNN
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/katago_rknn.yml'
+      - 'tools/convert_katago_rknn.py'
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Rockchip conversion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libglib2.0-0
+          python -m pip install --upgrade pip
+          python -m pip install 'torch==2.4.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'numpy==1.26.4' 'onnx==1.18.0' 'onnxruntime==1.19.2' 'protobuf==4.25.4' \
+            'scipy==1.14.1' 'psutil>=5.9' 'ruamel.yaml>=0.17.21' 'tqdm>=4.64' \
+            'opencv-python-headless==4.10.0.84' 'fast-histogram>=0.11'
+          python -m pip install --no-deps 'rknn-toolkit2==2.3.2'
+          python - <<'PY'
+          import onnx, numpy, torch
+          from rknn.api import RKNN
+          print("onnx", onnx.__version__, "numpy", numpy.__version__, "torch", torch.__version__)
+          print("RKNN toolkit import OK")
+          PY
+
+      - name: Download published ONNX model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p models
+          curl -fL --retry 3 \
+            -o models/10b_19x19.onnx \
+            'https://github.com/rstg00po54/go/releases/download/katago-10b-onnx-v1/10b_19x19.onnx'
+          test "$(wc -c < models/10b_19x19.onnx)" -gt 1000000
+          sha256sum models/10b_19x19.onnx
+
+      - name: Convert ONNX to RKNN
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -u tools/convert_katago_rknn.py \
+            --onnx models/10b_19x19.onnx \
+            --output models/katago_10b_19x19.rknn \
+            2>&1 | tee rknn_convert.log
+          test -s models/katago_10b_19x19.rknn
+          sha256sum models/katago_10b_19x19.rknn > models/katago_10b_19x19.rknn.sha256
+
+      - name: Upload converted RKNN to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=katago-10b-rknn-v1
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title 'KataGo 10b 19x19 RK3588 NPU' \
+              --notes 'RKNN-Toolkit2 2.3.2 conversion from g170 KataGo 10b ONNX model (19x19; batch 1; opset 19); unquantized build. Neural outputs need reference validation before MCTS integration. Download and run tools/bench_rk3588_npu.sh on RK3588.'
+          fi
+          gh release upload "$TAG" models/katago_10b_19x19.rknn models/katago_10b_19x19.rknn.sha256 --clobber
+
+      - name: Preserve conversion logs and model
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: katago-rknn-conversion
+          path: |
+            rknn_convert.log
+            models/katago_10b_19x19_opset19.onnx
+            models/*.rknn
+            models/*.sha256
+          if-no-files-found: ignore
