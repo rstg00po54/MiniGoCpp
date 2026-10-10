@@ -23,7 +23,23 @@ The host exporter `tools/export_katago_neuron_full.py` loads the original model,
 - OutputScoreValue
 - OutputOwnership
 
-GitHub Actions confirms the original **198 ONNX nodes** yield a **126-operation Neuron graph, 212 operands, 2 model feature inputs and 5 output heads** in a 6,018,311-byte packet, and that the Android ARM64 C++ runner compiles. These are host/CI validations only: successful **whole-network MDLA runtime**, full precision agreement, and NN evals/s have **not yet been confirmed on the physical vivo**.
+GitHub Actions confirms the original **198 ONNX nodes** yield a **126-operation Neuron graph, 212 operands, 2 model feature inputs and 5 output heads** in a 6,018,311-byte packet, and that the Android ARM64 C++ runner compiles.
+
+### Verified physical vivo X300 Pro result — 2026-10-10
+
+The user ran `RUNS=5 WARMUP=2 bash tools/bench_mediatek_katago_full.sh mtk-mdla` on vivo X300 Pro (MT6993, Neuron SDK 9.2.0). The complete original KataGo 10b network **succeeded on the device-pinned MDLA** with **zero unsupported operations**, compiled all 126 operations in **882.219 ms**, and ran the full five-head inference at **1.583 ms mean**, **1.626 ms p50**, **1.741 ms p95** or **631.82 NN evals/s** for batch 1, 19×19, all-ones valid-board mask.
+
+Per-output verification against full ONNX Runtime CPU (all pass according to the harness's FP16 tolerance):
+
+| Output | Wrong / elements | Max abs error | Mean abs error |
+| --- | ---: | ---: | ---: |
+| OutputPolicyPass | 0/1 | 0.000161 | 0.000161 |
+| OutputPolicy | 0/361 | 0.002888 | 0.000626 |
+| OutputValue | 0/3 | 0.001606 | 0.000616 |
+| OutputScoreValue | 0/4 | 0.001839 | 0.000920 |
+| OutputOwnership | 0/361 | 0.000269 | 0.000082 |
+
+**Caveat:** initial result uses just two warmups and five timed executions, so it establishes successful **short-run** NN-only inference, not sustained thermal/clock stability. Inputs are deterministic generated feature tensors with a 19×19 full-board mask; this is not an engine-generated real position, not game search and not MCTS visits/s. For repeatability use `RUNS=1000 WARMUP=100 bash tools/bench_mediatek_katago_full.sh mtk-mdla`. The native conversion uses constant folding valid for the stated all-ones mask, not an arbitrary smaller board.
 
 A failure may print `KATAGO_FULL_UNSUPPORTED_OP` with the converted operation index/type, `KATAGO_FULL_NN_FAIL` with the failing SDK API, or per-head precision errors. Only `KATAGO_FULL_NN_PASS` establishes complete KataGo 10b NN evals/s on the selected Neuron device. This is one NN forward pass (batch=1), not Go MCTS visits/s, nor a fully plumbed Android KataGo game-engine backend.
 
