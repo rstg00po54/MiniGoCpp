@@ -98,6 +98,24 @@ jobs:
           assert magic==b"K10CV001" and a[2]>0 and a[3]>0 and a[10]>0 and a[11]>0
           print("Validated ONNX first Conv extracted packet:", a, p.stat().st_size)
           PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+      - name: Validate real KataGo Conv exporter on Python 3.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          python -m pip install 'numpy==1.24.4' 'onnx==1.16.2' 'onnxruntime==1.16.3'
+          python tools/export_katago_first_conv.py \
+            --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_first_conv_py38.bin
+          python - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path("build/neuron_android/katago_first_conv_py38.bin")
+          magic,*a=struct.unpack("<8s12I",p.read_bytes()[:56])
+          assert magic==b"K10CV001" and a==[19,19,22,128,5,5,2,2,2,2,19,19], a
+          print("PASS Python3.8 ONNX Runtime 1.16.3: real KataGo first Conv",a)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
