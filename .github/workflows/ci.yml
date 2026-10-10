@@ -1,0 +1,23 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Smoke test init and match
+        run: |
+          ./build/minigo init --size 3 --hidden 16 --seed 42 --out build/initial3.bin
+          ./build/minigo train --size 3 --hidden 16 --games 10 --sims 8 --epochs 1 --out build/my3.bin
+          ./build/minigo match --black build/my3.bin --white build/initial3.bin --games 8 --sims 8 --alternate 1
+          ./build/minigo inspect --model build/my3.bin
