@@ -86,7 +86,10 @@ echo "Pushing native benchmark, RKNN model and Android runtime via ADB..."
 LIBCPP="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 if [ -s "$LIBCPP" ]; then "${ADB_ARGS[@]}" push "$LIBCPP" "$REMOTE/libc++_shared.so"; fi
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/rknn_bench_android"
-for core in 0 all; do
+# Default compares the three individual cores with the combined-core mode.
+# Override: CORE_MODES="0 all" or CORE_MODES="all 2 1 0".
+CORE_MODES="${CORE_MODES:-0 1 2 all}"
+for core in $CORE_MODES; do
     echo "===== Android RK3588 NPU core=$core ====="
     "${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE ./rknn_bench_android katago_10b_19x19.rknn $core $WARMUP $RUNS" | tr -d '\r'
 done
