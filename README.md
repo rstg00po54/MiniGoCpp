@@ -172,11 +172,13 @@ bash build.sh
 - [转换步骤、安装依赖、测试说明](docs/KATAGO_RK3588_NPU.md)
 - [GitHub RKNN 模型发布页](https://github.com/rstg00po54/MiniGoCpp/releases/tag/katago-10b-rknn-v1)
 
-在 RK3588 Ubuntu 上：
+在 **x86 Ubuntu 宿主机**上连接 RK3588 **Android** 开发板，通过 ADB 测速（Android 端不需要 Python）：
 
 ```bash
 git pull
-python3 -m pip install --user 'numpy<2' 'rknn-toolkit-lite2==2.3.2'
+adb devices -l
 bash tools/bench_rk3588_npu.sh
 ```
+
+如需多设备选择：`ADB_SERIAL=RK3588设备序列号 bash tools/bench_rk3588_npu.sh`。RK3588 Linux（非 Android）仍可使用 `tools/benchmark_rknn.py`，需要在板端安装 Lite2。
 
