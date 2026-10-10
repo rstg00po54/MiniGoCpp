@@ -2,9 +2,10 @@
 # Non-invasive MediaTek Neuron/NeuroPilot availability probe via ADB.
 # Does not require root or install any APK; library presence does not prove access.
 set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB_BIN="${ADB:-adb}"
-ARGS=("$ADB_BIN")
-if [ -n "${ADB_SERIAL:-}" ]; then ARGS+=(-s "$ADB_SERIAL"); fi
+ADB_SERIAL="$(ADB="$ADB_BIN" bash "$ROOT/tools/select_adb_device.sh" vivo)"
+ARGS=("$ADB_BIN" -s "$ADB_SERIAL")
 command -v "$ADB_BIN" >/dev/null || { echo "ERROR: adb not found." >&2; exit 1; }
 "${ARGS[@]}" get-state >/dev/null || { echo "ERROR: No ADB device." >&2; exit 1; }
 soc="$("${ARGS[@]}" shell 'getprop ro.soc.model; getprop ro.board.platform' | tr -d '\r')"
