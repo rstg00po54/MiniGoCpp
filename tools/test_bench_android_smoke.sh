@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT
 cat > "$TMP/adb" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${1:-}" = "-s" ]; then shift 2; fi
 case "${1:-}" in
   get-state) echo device ;;
   get-serialno) echo 10AFB21HP5002ZK ;;
