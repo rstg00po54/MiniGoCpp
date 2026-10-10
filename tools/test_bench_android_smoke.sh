@@ -59,11 +59,18 @@ grep -q '===== DONE =====' <<< "$vivo_probe"
 vivo_rknn="$(ADB="$TMP/adb" BENCH_LOG="$TMP/skip.log" bash "$ROOT/tools/bench_android.sh" vivo rknn)"
 grep -q 'SKIP RKNN: This is not an RK3588 Android target.' <<< "$vivo_rknn"
 
-if ADB="$TMP/adb" BENCH_LOG="$TMP/npu.log" bash "$ROOT/tools/bench_android.sh" vivo npu >"$TMP/npu.out" 2>&1; then
+# Mock successful Neuron Adapter smoke (NOT a KataGo NN benchmark).
+cat > "$TMP/mock_neuron.sh" <<'SH'
+#!/usr/bin/env bash
+echo "NEURON_ADAPTER_SMOKE_PASS: fake test double"
+SH
+chmod +x "$TMP/mock_neuron.sh"
+if ADB="$TMP/adb" NEURON_SMOKE_RUNNER="$TMP/mock_neuron.sh" BENCH_LOG="$TMP/npu.log" bash "$ROOT/tools/bench_android.sh" vivo npu >"$TMP/npu.out" 2>&1; then
     echo "FAIL: vivo npu must not claim a valid result without a MediaTek backend" >&2
     exit 1
 fi
 grep -q 'NPU_NOT_BENCHMARKED:' "$TMP/npu.out"
+grep -q 'NEURON_ADAPTER_SMOKE_PASS:' "$TMP/npu.out"
 grep -q 'ADB: 192.168.0.184:5555 manufacturer=vivo' "$TMP/npu.out"
 
 printf 'PASS: vivo=%s rk=%s; ADB selection, probe and no-fake-NPU checks passed.\n' "$vivo" "$rk"
