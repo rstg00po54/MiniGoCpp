@@ -99,7 +99,7 @@ def export(model_path, out_path, seed=42):
     gpool_output="rconv5/gpconcat/78"
     if gpool_output not in nodes: raise ValueError("Missing original global pool concat")
     # Reuse model with this additional output, preserving same initial random seed.
-    graph.output.extend([helper.make_tensor_value_info(gpool_output,TensorProto.FLOAT,[1,96,1,1])])
+    ref.graph.output.extend([helper.make_tensor_value_info(gpool_output,TensorProto.FLOAT,[1,96,1,1])])
     onnx.checker.check_model(ref)
     sess2=ort.InferenceSession(ref.SerializeToString(),opts,providers=["CPUExecutionProvider"])
     original_concat=sess2.run([gpool_output],feeds)[0]
