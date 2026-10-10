@@ -107,6 +107,13 @@ jobs:
           bash -n tools/bench_mediatek_katago_residual_stack.sh
           grep -Fq '"$ROOT/tools/export_katago_residual_stack.py"' tools/bench_mediatek_katago_residual_stack.sh
           grep -Fq '"$ROOT/tools/neuron_katago_residual_stack_android.cpp"' tools/bench_mediatek_katago_residual_stack.sh
+          grep -Fq '"$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_residual_stack_android.cpp" -ldl -o "$BIN"' tools/bench_mediatek_katago_residual_stack.sh
+          if grep -Fq '"$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_rconv1_android.cpp" -ldl -o "$BIN"' tools/bench_mediatek_katago_residual_stack.sh; then
+            echo "ERROR: Stack launcher still compiles legacy single-block source" >&2
+            exit 1
+          fi
+          grep -Fq 'BIN="$CACHE/neuron_katago_residual_stack_android_v2"' tools/bench_mediatek_katago_residual_stack.sh
+          grep -Fq "grep -aFq 'K10RS001'" tools/bench_mediatek_katago_residual_stack.sh
           grep -Fq '"chmod 755 $REMOTE/neuron_katago_residual_stack_android"' tools/bench_mediatek_katago_residual_stack.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_residual_stack_android.cpp -ldl -o build/neuron_android/neuron_katago_residual_stack_android
           file build/neuron_android/neuron_katago_residual_stack_android
