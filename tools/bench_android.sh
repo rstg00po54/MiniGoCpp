@@ -5,8 +5,11 @@ set -Eeuo pipefail
 trap 'rc=$?; echo "ERROR: benchmark launcher failed at line $LINENO (exit $rc): $BASH_COMMAND" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB="${ADB:-adb}"
-ADB_ARGS=("$ADB")
-[ -z "${ADB_SERIAL:-}" ] || ADB_ARGS+=(-s "$ADB_SERIAL")
+TARGET=auto
+if [[ "${1:-}" == vivo || "${1:-}" == rk ]]; then TARGET="$1"; shift; fi
+# Select by actual device properties, never by ADB connection order or serial format.
+ADB_SERIAL="$(ADB="$ADB" bash "$ROOT/tools/select_adb_device.sh" "$TARGET")"
+ADB_ARGS=("$ADB" -s "$ADB_SERIAL")
 CACHE="${KATAGO_BENCH_CACHE:-$HOME/.cache/minigocpp/androidbench}"
 MODEL="$CACHE/10b_19x19.onnx"
 BASE="/data/local/tmp/minigocpp_onnx"
@@ -108,17 +111,30 @@ gpu_test() {
         return 0
     fi
     echo "Using existing GPU search benchmark: $script"
-    ANDROID_SERIAL="$serial" KATAGO_BENCH_VISITS="${KATAGO_BENCH_VISITS:-200}" \
+    ADB_SERIAL="$serial" ANDROID_SERIAL="$serial" KATAGO_BENCH_VISITS="${KATAGO_BENCH_VISITS:-200}" \
         KATAGO_BENCH_POSITIONS="${KATAGO_BENCH_POSITIONS:-5}" KATAGO_BENCH_THREADS="${KATAGO_BENCH_THREADS:-2}" \
         bash "$script" gpu
 }
 run_all() {
-    echo "KataGo 10b Android ADB benchmark: $MODES"
+    echo "KataGo 10b Android ADB benchmark: target=$TARGET modes=$MODES"
     echo "RUNS=$RUNS WARMUP=$WARMUP THREADS=$THREADS"
     local error=0
     for m in $MODES; do
         case "$m" in
             probe) ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/probe_mediatek_npu.sh" || error=1 ;;
+            npu)
+                if [[ "${soc,,}" == *rk3588* ]]; then
+                    echo "===== RK3588 NPU ====="
+                    CORE_MODES="${CORE_MODES:-0 1 2 all}" RUNS="$RUNS" WARMUP="$WARMUP" ADB_SERIAL="$serial" \
+                        bash "$ROOT/tools/bench_rk3588_npu.sh" || error=1
+                else
+                    echo "===== vivo/MediaTek NPU availability ====="
+                    ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/probe_mediatek_npu.sh" || error=1
+                    echo "NPU_NOT_BENCHMARKED: No verified MediaTek Neuron/LiteRT inference backend for the KataGo 10b model is integrated yet."
+                    echo "NNAPI on this vivo exposed only nnapi-reference CPU and allocated zero NNAPI nodes."
+                    echo "No valid vivo NPU latency or NN evals/s can be reported from this script."
+                    error=1
+                fi ;;
             cpu|nnapi) nn_test "$m" || error=1 ;;
             gpu) gpu_test || error=1 ;;
             rknn)
@@ -129,7 +145,7 @@ run_all() {
                     CORE_MODES="${CORE_MODES:-0 1 2 all}" RUNS="$RUNS" WARMUP="$WARMUP" ADB_SERIAL="$serial" \
                         bash "$ROOT/tools/bench_rk3588_npu.sh" || error=1
                 fi ;;
-            *) echo "Unknown mode: $m (supported: auto probe cpu nnapi gpu rknn)" >&2; error=1 ;;
+            *) echo "Unknown mode: $m (supported: auto npu probe cpu nnapi gpu rknn)" >&2; error=1 ;;
         esac
     done
     echo "===== DONE ====="
