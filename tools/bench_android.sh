@@ -133,7 +133,7 @@ run_all() {
                     echo "===== vivo/MediaTek NPU availability ====="
                     ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/probe_mediatek_npu.sh" || error=1
                     echo "===== Neuron Adapter: native FP32 ADD smoke test ====="
-                    ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/bench_mediatek_neuron.sh" || error=1
+                    ADB_SERIAL="$serial" ADB="$ADB" bash "${NEURON_SMOKE_RUNNER:-$ROOT/tools/bench_mediatek_neuron.sh}" || error=1
                     echo "NPU_NOT_BENCHMARKED: This tested native Neuron API access with a tiny ADD graph, NOT KataGo 10b."
                     echo "KataGo must be converted and compiled for this MediaTek backend before claiming NN evals/s."
                     error=1
