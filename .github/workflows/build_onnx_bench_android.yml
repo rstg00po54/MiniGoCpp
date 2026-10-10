@@ -5,6 +5,7 @@ on:
     paths:
       - 'tools/onnx_bench_android.cpp'
       - 'tools/bench_android.sh'
+      - 'tools/test_bench_android_smoke.sh'
       - '.github/workflows/build_onnx_bench_android.yml'
   workflow_dispatch:
 
