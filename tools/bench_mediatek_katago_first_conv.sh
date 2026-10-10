@@ -34,8 +34,9 @@ if ! "$PYTHON" -c 'import onnx, onnxruntime, numpy' >/dev/null 2>&1; then
     fi
     PYTHON="$VENV/bin/python"
     if ! "$PYTHON" -c 'import onnx, onnxruntime, numpy' >/dev/null 2>&1; then
-        echo "Installing ONNX reference tools into isolated cache venv..."
-        "$PYTHON" -m pip install 'numpy==1.24.4' 'onnx==1.16.2' 'onnxruntime==1.19.2'
+        ORT_VERSION="$("$PYTHON" -c 'import sys; print("1.16.3" if sys.version_info < (3, 9) else "1.19.2")')"
+        echo "Installing ONNX reference tools for $("$PYTHON" --version 2>&1); onnxruntime==$ORT_VERSION"
+        "$PYTHON" -m pip install 'numpy==1.24.4' 'onnx==1.16.2' "onnxruntime==$ORT_VERSION"
     fi
 fi
 
