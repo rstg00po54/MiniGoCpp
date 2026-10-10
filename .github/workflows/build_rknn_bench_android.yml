@@ -1,0 +1,51 @@
+name: Build Android RK3588 NPU benchmark
+
+on:
+  push:
+    paths:
+      - 'tools/rknn_bench_android.cpp'
+      - '.github/workflows/build_rknn_bench_android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install 'ndk;27.2.12479018'
+      - name: Compile Android ARM64 benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/rknn_android
+          BASE="https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v2.3.2/rknpu2/runtime/Android/librknn_api"
+          curl -fL --retry 3 -o build/rknn_android/rknn_api.h "$BASE/include/rknn_api.h"
+          curl -fL --retry 3 -o build/rknn_android/librknnrt.so "$BASE/arm64-v8a/librknnrt.so"
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++" \
+            -std=c++17 -O2 -fPIE -pie -Ibuild/rknn_android tools/rknn_bench_android.cpp \
+            -Lbuild/rknn_android -lrknnrt -llog -ldl -Wl,-rpath,'$ORIGIN' \
+            -o build/rknn_android/rknn_bench_android
+          file build/rknn_android/rknn_bench_android
+      - name: Add compiled tool to existing RKNN release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload katago-10b-rknn-v1 build/rknn_android/rknn_bench_android --clobber
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rknn-bench-android-arm64
+          path: build/rknn_android/rknn_bench_android
+          if-no-files-found: ignore
