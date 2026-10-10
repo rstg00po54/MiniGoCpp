@@ -1,5 +1,38 @@
 # KataGo 10b -> ONNX -> RK3588 NPU
 
+## RK3588 Android ADB benchmark (Ubuntu host, recommended)
+
+**Run on your x86 Ubuntu virtual machine**; the device must be an **RK3588/RK3588S running Android** connected with ADB. The older Python RKNNLite benchmark below is only for native Linux (Ubuntu/Buildroot) on RK3588, not Android. Android does **not** need Python or RKNN-Toolkit-Lite2.
+
+Prerequisites on the host: `adb`, `curl` or `wget`, and Android NDK 27.2.12479018 (your installation is at `/home/cc/Android/Sdk/ndk/27.2.12479018`).
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+adb devices -l
+bash tools/bench_rk3588_npu.sh
+```
+
+If multiple Android devices are connected, target RK3588 explicitly (rather than vivo):
+
+```bash
+ADB_SERIAL=YOUR_RK3588_ADB_SERIAL bash tools/bench_rk3588_npu.sh
+```
+
+For a longer run:
+
+```bash
+RUNS=500 WARMUP=50 bash tools/bench_rk3588_npu.sh
+```
+
+The script checks RK3588 hardware properties, automatically downloads the 19x19 10b RKNN model and Rockchip **Android** `librknnrt.so` v2.3.2, compiles `tools/rknn_bench_android.cpp` using host NDK, pushes executable + model + runtime with `adb push`, and runs two tests using `adb shell` in `/data/local/tmp/minigocpp_npu`. No Linux ARM Python wheels needed. It reports mean/P50/P95 neural network evaluation latency for core 0 and core 0+1+2. Three cores do not automatically mean 3x speed for batch=1.
+
+The benchmark uses **synthetic** empty-board-shaped tensors, so its timing is useful for NPU neural inference profiling but not a substitute for validating numerical accuracy or measuring KataGo MCTS visits/s. A successfully compiled `.rknn` model may still be incompatible with your installed NPU kernel driver. If `rknn_init` fails, capture the printed runtime and driver errors (and Android `logcat`).
+
+GitHub additionally [builds the native Android benchmark](../.github/workflows/build_rknn_bench_android.yml) for ABI validation. The host script compiles locally to avoid version mismatches.
+
+---
+
 This is an **optional standalone inference benchmark**. MiniGoCpp's existing training/search engine is unchanged. The 10b network is a different model; do not load the `minigo` .bin files with RKNN.
 
 ## Status and model
