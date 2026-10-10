@@ -2,6 +2,26 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Integrated KataGo rconv1 FP16 graph on the same MediaTek MDLA device
+
+The single-operation vivo tests now confirm:
+
+- Real `rconv1/w1` on `mtk-mdla`: mean **0.788 ms**, 46,208/46,208 values matched CPU.
+- Real `rconv1/w2`: mean **0.374 ms**, all outputs matched.
+- Native 19x19x128 FP16 residual ADD: mean **0.880 ms**, all outputs matched.
+
+**These latencies cannot be summed as a true fused rconv1 inference.** A new test creates **one complete `rconv1` device-pinned FP16 graph** containing seven operations: norm1 scale Mul, norm1 bias Add with fused ReLU, real 3x3 conv w1, norm2 scale Mul, norm2 bias Add with fused ReLU, real conv w2, and residual Add. It uses the true 10b weights and per-channel normalization values, and starts with the ONNX graph's actual `trunk/initbias` tensor. The source ONNX network also multiplies intermediate activations by the board mask: those are omitted only because the full 19x19 test explicitly fixes `InputMask` to all ones.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_rconv1.sh mtk-mdla
+```
+
+The exporter `tools/export_katago_rconv1_block.py` builds an isolated opset19/IR9 ONNX CPU reference graph comprising the **actual** 10b upstream operators and `rconv1`, computes the input and expected output, and packs them with original weights/scales/biases. The native program `tools/neuron_katago_rconv1_android.cpp` queries the MDLA support for each of the seven operations before attempting `NeuronCompilation_createForDevices`; it reports `KATAGO_RCONV1_OP_SUPPORT`, `KATAGO_RCONV1_COMPILE`, `KATAGO_RCONV1_VERIFY`, and `KATAGO_RCONV1_PASS` only if correct. If a broadcast Mul or fused Add fails, the exact unsupported step will be printed so graph decomposition can be reconsidered.
+
+The isolated full block has not yet been confirmed on real vivo hardware. Even a successful `blocks/s` result is **not** a KataGo 10b NN eval/s measurement.
+
 ## KataGo first residual block: native MDLA feasibility (real 10b weights)
 
 The actual 10b ONNX graph has `rconv1/w1` and `rconv1/w2`, each `128 -> 128` channels with `3x3` filters. Between and around them are per-channel normalization (Mul/Add), ReLU, board-mask multiplication and a residual Add. This is a **multi-operator** block, not just two independent convolution calls.
