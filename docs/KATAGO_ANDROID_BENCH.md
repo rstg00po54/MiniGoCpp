@@ -2,6 +2,27 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## KataGo first residual block: native MDLA feasibility (real 10b weights)
+
+The actual 10b ONNX graph has `rconv1/w1` and `rconv1/w2`, each `128 -> 128` channels with `3x3` filters. Between and around them are per-channel normalization (Mul/Add), ReLU, board-mask multiplication and a residual Add. This is a **multi-operator** block, not just two independent convolution calls.
+
+The next tests, which leave the successful first-Conv test unchanged, separately evaluate the real weights of `rconv1/w1` and `rconv1/w2` on the `mtk-mdla` device. Host Python builds isolated opset19/IR9 ONNX CPU *upstream* subgraphs and exports each convolution's true input and FP32 reference output. Thus the input to `w2` accounts for the real upstream normalization/activation and `w1`, rather than being arbitrary data. The existing native Neuron FP16 packet runner validates every output value before reporting timing.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_residual_conv.sh rconv1/w1 mtk-mdla
+bash tools/bench_mediatek_katago_residual_conv.sh rconv1/w2 mtk-mdla
+```
+
+The residual block's skip connection also requires an ADD of two 19x19x128 tensors. A *separate* synthetic FP16 ADD test checks if MDLA can compile/execute this realistic shape. The older FP32 64-element ADD was not supported, which does not settle FP16 ADD support.
+
+```bash
+bash tools/bench_mediatek_residual_add.sh mtk-mdla
+```
+
+These tests intentionally **do not** report complete KataGo NN evals/s. The output for either Conv still uses the legacy `KATAGO_FIRST_CONV_*` lines from the shared packet runner but refers only to the selected Conv, identified by the host script.
+
 ## Real KataGo 10b first Conv: ONNX weights on MediaTek MDLA
 
 This is the first experiment using **real KataGo 10b model weights**, not hand-made constant kernels. The exporter loads the original 19x19 `10b_19x19.onnx`, finds its first `Conv` with constant weights, uses the **original Conv node, tensor dimensions and FP32 weights** in a standalone opset-19/IR-9 reference graph to generate the CPU golden output (so Python 3.8 / ONNX Runtime 1.16.3 works), and exports a binary packet. The source ONNX model is left unchanged:
