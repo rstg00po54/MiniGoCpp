@@ -182,3 +182,26 @@ bash tools/bench_rk3588_npu.sh
 
 如需多设备选择：`ADB_SERIAL=RK3588设备序列号 bash tools/bench_rk3588_npu.sh`。RK3588 Linux（非 Android）仍可使用 `tools/benchmark_rknn.py`，需要在板端安装 Lite2。
 
+
+## 安卓统一 ADB 测速（RK3588 与 vivo X300 Pro）
+
+新增 `tools/bench_android.sh`，在 Ubuntu x86 虚拟机里调用 ADB，不需要给安卓设备安装 Python：
+
+```bash
+git pull
+adb devices -l
+bash tools/bench_android.sh
+```
+
+**vivo** 默认测试 ONNX Runtime CPU、NNAPI 和现有 KataGo OpenCL GPU 测试；**RK3588 Android** 还会包含 RKNN NPU。可单独选择：
+
+```bash
+bash tools/bench_android.sh cpu nnapi
+bash tools/bench_android.sh gpu
+bash tools/bench_android.sh rknn
+```
+
+多台设备：`ADB_SERIAL=设备序列号 bash tools/bench_android.sh`。GPU 复用本地 `../GoEngine-java/tools/benchmark_katago_android.sh`，没有该文件时会明确跳过；也可通过 `KATAGO_GPU_SCRIPT=/实际路径/benchmark_katago_android.sh` 指定。详细说明见 [Android 统一测速说明](docs/KATAGO_ANDROID_BENCH.md)。
+
+**注意：** RKNN 和 ONNX Runtime CPU/NNAPI 给出 *NN-only* 的 `nnEvals/s`；GPU 现有脚本给出包含 MCTS 的 `visits/s`，二者不能直接比较。NNAPI 是候选硬件加速路径，不等同于联发科 NPU；测试工具将报告 NNAPI 节点是否实际参与执行，未验证驱动分配前不能声称测试到了手机 NPU。
+
