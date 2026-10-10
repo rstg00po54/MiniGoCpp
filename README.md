@@ -17,18 +17,19 @@ MiniGoCpp/
 │   └── main.cpp       train/play/eval/inspect 命令行
 ├── tests/
 │   └── test.cpp       单元测试
-└── models/
-    ├── go3.bin        3×3 演示模型（只训练了 20 盘）
-    └── go5.bin        5×5 演示模型（只训练了 30 盘）
+└── models/           训练时自动生成模型文件（不提交到仓库）
 ```
 
 ## 1. Ubuntu 编译
 
 ```bash
-sudo apt install -y build-essential cmake
-cd ~/MiniGoCpp
+sudo apt install -y build-essential cmake git
+git clone https://github.com/rstg00po54/MiniGoCpp.git
+cd MiniGoCpp
 ./build.sh
 ```
+
+仓库不附带预训练模型，请先按第 2 节从零训练，生成 `models/my3.bin` 后再执行 `play` / `eval` / `inspect`。
 
 编译完成：`./build/minigo`。`build.sh` 自动运行单元测试。**不建议在 `/mnt/hgfs/` 下编译**，可以把源码放在虚拟机的 `~/MiniGoCpp` 中。
 
