@@ -209,9 +209,11 @@ bash tools/bench_android.sh rknn
 ### ADB 多设备自动选择（vivo 手机 / RK3588）
 
 ```bash
-bash tools/bench_android.sh vivo        # vivo：检查 NeuroPilot NPU 接入情况，不伪造性能成绩
+bash tools/bench_android.sh vivo        # vivo：尝试加载 Neuron Adapter 并运行一个小型 FP32 计算图（非 KataGo 测速）
 bash tools/bench_android.sh vivo cpu nnapi  # 手机 CPU/NNAPI 推理，NNAPI 未必是 NPU
 bash tools/bench_android.sh rk          # RK3588：自动运行 RKNN NPU 测速
 ```
 
 通过制造商和 SoC 属性识别连接的设备，不依赖 ADB 列表顺序。如有相同机型的多个连接，可使用 `ADB_SERIAL=设备序列号` 强制选择。**vivo NPU 模式目前是能力检查，不是已经实现的联发科 Neuron 推理测试**；详见 [Android 测试说明](docs/KATAGO_ANDROID_BENCH.md)。
+
+通过 `bash tools/bench_mediatek_neuron.sh` 可单独执行原生 Neuron Adapter API 检测：编译 Android ARM64 C++，ADB 推送，尝试 Neuron 编译、推理并验证结果。这个阶段还不代表 KataGo 10b 已在 vivo NPU 上运行。
