@@ -2,6 +2,31 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## Full KataGo 10b on vivo MDLA — one graph, all five output heads
+
+The previous native tests on MT6993 confirmed the actual KataGo `rconv1-rconv4` block stack and the genuine `rconv5` global pooling 1x1 branch. The full KataGo 10b network is now exported in **one** Neuron graph for a 19x19 all-valid board:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_katago_full.sh mtk-mdla
+
+# For a faster initial diagnostic:
+RUNS=5 WARMUP=2 bash tools/bench_mediatek_katago_full.sh mtk-mdla
+```
+
+The host exporter `tools/export_katago_neuron_full.py` loads the original model, generates the full 19x19 batch-1 ONNX CPU reference with Python3.8/ONNX Runtime 1.16.3, folds the **all-ones 19x19 InputMask** scalar computations, maps NCHW activations and OIHW filters to native FP16 NHWC/OHWI, rewrites 19x19 full-board masked spatial sums/division as spatial mean, and emits a binary self-contained graph packet. The Android executable `tools/neuron_katago_full_android.cpp` enumerates `mtk-mdla`, confirms operator support on the **specified** device, compiles one graph with `NeuronCompilation_createForDevices`, then verifies **all five** outputs against ONNX CPU before reporting whole-network NN-only latency:
+
+- OutputPolicyPass
+- OutputPolicy
+- OutputValue
+- OutputScoreValue
+- OutputOwnership
+
+GitHub Actions confirms the original **198 ONNX nodes** yield a **126-operation Neuron graph, 212 operands, 2 model feature inputs and 5 output heads** in a 6,018,311-byte packet, and that the Android ARM64 C++ runner compiles. These are host/CI validations only: successful **whole-network MDLA runtime**, full precision agreement, and NN evals/s have **not yet been confirmed on the physical vivo**.
+
+A failure may print `KATAGO_FULL_UNSUPPORTED_OP` with the converted operation index/type, `KATAGO_FULL_NN_FAIL` with the failing SDK API, or per-head precision errors. Only `KATAGO_FULL_NN_PASS` establishes complete KataGo 10b NN evals/s on the selected Neuron device. This is one NN forward pass (batch=1), not Go MCTS visits/s, nor a fully plumbed Android KataGo game-engine backend.
+
 ## Vivo X300 Pro 4-block result and genuine rconv5 global pooling
 
 The real vivo X300 Pro (MT6993, Neuron SDK 9.2.0, `mtk-mdla` pinned) executed the original KataGo 10b first 2 and 4 residual blocks as one native FP16 Neuron graph on a 19x19 full-board input:
