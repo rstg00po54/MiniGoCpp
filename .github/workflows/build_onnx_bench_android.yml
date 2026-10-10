@@ -10,6 +10,8 @@ on:
       - 'tools/neuron_smoke_android.cpp'
       - 'tools/neuron_conv_android.cpp'
       - 'tools/bench_mediatek_conv.sh'
+      - 'tools/bench_mediatek_conv_fp16.sh'
+      - 'tools/neuron_conv_fp16_android.cpp'
       - 'tools/probe_mediatek_npu.sh'
       - 'tools/test_bench_android_smoke.sh'
       - '.github/workflows/build_onnx_bench_android.yml'
@@ -68,6 +70,9 @@ jobs:
           bash -n tools/bench_mediatek_conv.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_conv_android.cpp -ldl -o build/neuron_android/neuron_conv_android
           file build/neuron_android/neuron_conv_android
+          bash -n tools/bench_mediatek_conv_fp16.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_conv_fp16_android.cpp -ldl -o build/neuron_android/neuron_conv_fp16_android
+          file build/neuron_android/neuron_conv_fp16_android
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -76,4 +81,5 @@ jobs:
             build/ort_android/onnx_bench_android
             build/neuron_android/neuron_smoke_android
             build/neuron_android/neuron_conv_android
+            build/neuron_android/neuron_conv_fp16_android
           if-no-files-found: ignore
