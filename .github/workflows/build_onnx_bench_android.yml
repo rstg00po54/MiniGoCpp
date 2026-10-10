@@ -24,6 +24,10 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+      - name: Regression test Vivo ADB device detection
+        run: |
+          bash -n tools/bench_android.sh
+          bash tools/test_bench_android_smoke.sh
       - name: Install NDK and ONNX Runtime Android
         shell: bash
         run: |
