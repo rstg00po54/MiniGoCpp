@@ -132,9 +132,10 @@ run_all() {
                 else
                     echo "===== vivo/MediaTek NPU availability ====="
                     ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/probe_mediatek_npu.sh" || error=1
-                    echo "NPU_NOT_BENCHMARKED: No verified MediaTek Neuron/LiteRT inference backend for the KataGo 10b model is integrated yet."
-                    echo "NNAPI on this vivo exposed only nnapi-reference CPU and allocated zero NNAPI nodes."
-                    echo "No valid vivo NPU latency or NN evals/s can be reported from this script."
+                    echo "===== Neuron Adapter: native FP32 ADD smoke test ====="
+                    ADB_SERIAL="$serial" ADB="$ADB" bash "$ROOT/tools/bench_mediatek_neuron.sh" || error=1
+                    echo "NPU_NOT_BENCHMARKED: This tested native Neuron API access with a tiny ADD graph, NOT KataGo 10b."
+                    echo "KataGo must be converted and compiled for this MediaTek backend before claiming NN evals/s."
                     error=1
                 fi ;;
             cpu|nnapi) nn_test "$m" || error=1 ;;
