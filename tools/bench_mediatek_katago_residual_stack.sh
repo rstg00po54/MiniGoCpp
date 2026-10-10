@@ -53,10 +53,17 @@ if [ -z "$NDK_DIR" ]; then
 fi
 CXX="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
 [ -x "$CXX" ] || { echo "ERROR: Android NDK compiler not found. Set NDK=/path/to/ndk/27.2.12479018" >&2; exit 1; }
-BIN="$CACHE/neuron_katago_residual_stack_android"
+BIN="$CACHE/neuron_katago_residual_stack_android_v2"
 if [ ! -x "$BIN" ] || [ "$ROOT/tools/neuron_katago_residual_stack_android.cpp" -nt "$BIN" ]; then
     echo "Compiling KataGo $BLOCKS-block stacked Neuron graph runner for Android arm64..."
-    "$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_rconv1_android.cpp" -ldl -o "$BIN"
+    "$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_residual_stack_android.cpp" -ldl -o "$BIN"
+fi
+# Catch stale or miscompiled binaries before sending them to the phone.
+# These static markers must be embedded by the intended Neuron stack runner.
+if ! grep -aFq 'K10RS001' "$BIN" || ! grep -aFq 'KATAGO_STACK_GRAPH' "$BIN"; then
+    echo "ERROR: Android binary is not the KataGo residual-stack executable: $BIN" >&2
+    rm -f "$BIN"
+    exit 1
 fi
 REMOTE="/data/local/tmp/minigocpp_neuron"
 echo "ADB vivo=$ADB_SERIAL pinned_device=$DEVICE graph=KataGo_${BLOCKS}_residual_FP16"
