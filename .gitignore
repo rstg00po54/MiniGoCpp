@@ -2,4 +2,7 @@ build/
 *.o
 *.a
 models/*.bin
+models/*.onnx
+models/*.rknn
+models/*.sha256
 .DS_Store
