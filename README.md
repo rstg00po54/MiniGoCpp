@@ -147,3 +147,20 @@ Linear(W2, b2)                  │
 ## 9. 后续建议
 
 先固定随机种子，训练 100、1000、5000 盘，每次记录对随机玩家胜率；然后实现和旧版模型的对战，才能客观衡量是否成长。可继续加入对称增强、较正规的梯度检查、胜负预测曲线、保存棋谱 SGF、甚至手写卷积层。开发这些功能时仍然不需要外部 AI 框架。
+
+## 模型初始化与模型对战
+
+`match` 用于比较两个网络的真实对弈表现。测试 100 盘时建议启用 `--alternate 1` 自动交换黑白，避免先手优势误导结果：
+
+```bash
+git pull
+bash build.sh
+./build/minigo init --size 3 --hidden 16 --seed 42 --out models/initial3.bin
+./build/minigo match --black models/my3.bin --white models/initial3.bin --games 100 --sims 24 --alternate 1
+```
+
+- `init` 创建未经训练的随机网络，`--seed 42` 与默认初始化的种子一致；默认拒绝覆盖已有模型，确需覆盖时使用 `--force 1`。
+- `match` 中 `--black` 与 `--white` 分别指定模型 A 和模型 B。在 `--alternate 1` 时每局交换一次执黑方，最后输出两个模型的总胜场和各自执黑执白的胜场。
+- 默认使用 `--sample 1`，根据 MCTS 访问次数分布抽样落子，避免每盘走法完全相同。可设 `--sample 0` 强制选择搜索最高概率落点，结果通常高度重复。
+- `--seed` 控制对战抽样随机种子。双方可用不同隐藏层大小，但棋盘尺寸必须一致。
+- `init`、`match` 不会修改已有训练好的模型。
