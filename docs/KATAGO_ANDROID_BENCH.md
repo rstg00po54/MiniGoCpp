@@ -39,6 +39,23 @@ Per-output verification against full ONNX Runtime CPU (all pass according to the
 | OutputScoreValue | 0/4 | 0.001839 | 0.000920 |
 | OutputOwnership | 0/361 | 0.000269 | 0.000082 |
 
+### Repeated full-network vivo MDLA benchmark — 1000 NN evaluations
+
+User verified `RUNS=1000 WARMUP=100 bash tools/bench_mediatek_katago_full.sh mtk-mdla` on the same vivo X300 Pro / MT6993. The original 126-operation full 10b graph compiled on `mtk-mdla`, all five heads again matched ONNX CPU within FP16 test tolerance, and returned:
+
+| Parameter | Measured result |
+| --- | ---: |
+| Neuron operations unsupported | 0/126 |
+| Compilation | 357.541 ms |
+| Warmup NN executions | 100 |
+| Timed NN executions | 1000 |
+| Mean latency | **1.428 ms** |
+| P50 latency | 1.439 ms |
+| P95 latency | 1.766 ms |
+| Full network NN evaluations/second | **700.16** |
+
+For both the initial 5-iteration and 1000-iteration runs, output errors matched (Pass 0.000161, Policy 0.002888, Value 0.001606, ScoreValue 0.001839, Ownership 0.000269 maximum absolute). Relative to the 5-run result, the 1000-run mean latency fell about 9.8% and NN-only throughput increased about 10.8%. The 1000 timed inferences take roughly **1.43 seconds** total, so this is still a short burst and does **not** establish long-term thermal sustain. It uses the same generated input tensors, all-ones 19x19 mask, and one batch; it does not measure KataGo MCTS or real-game engine integration.
+
 **Caveat:** initial result uses just two warmups and five timed executions, so it establishes successful **short-run** NN-only inference, not sustained thermal/clock stability. Inputs are deterministic generated feature tensors with a 19×19 full-board mask; this is not an engine-generated real position, not game search and not MCTS visits/s. For repeatability use `RUNS=1000 WARMUP=100 bash tools/bench_mediatek_katago_full.sh mtk-mdla`. The native conversion uses constant folding valid for the stated all-ones mask, not an arbitrary smaller board.
 
 A failure may print `KATAGO_FULL_UNSUPPORTED_OP` with the converted operation index/type, `KATAGO_FULL_NN_FAIL` with the failing SDK API, or per-head precision errors. Only `KATAGO_FULL_NN_PASS` establishes complete KataGo 10b NN evals/s on the selected Neuron device. This is one NN forward pass (batch=1), not Go MCTS visits/s, nor a fully plumbed Android KataGo game-engine backend.
