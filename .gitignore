@@ -1,5 +1,5 @@
 build/
 *.o
 *.a
-models/my*.bin
+models/*.bin
 .DS_Store
