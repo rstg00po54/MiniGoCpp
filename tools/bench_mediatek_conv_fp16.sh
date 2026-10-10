@@ -27,7 +27,7 @@ fi
 
 CACHE="${NEURON_BENCH_CACHE:-$HOME/.cache/minigocpp/neuron}"
 mkdir -p "$CACHE"
-EXE="$CACHE/neuron_conv_fp16_android"
+EXE="$CACHE/neuron_conv_fp16_android_v2"
 if [ ! -x "$EXE" ] || [ "$ROOT/tools/neuron_conv_fp16_android.cpp" -nt "$EXE" ]; then
     echo "Compiling Android ARM64 Neuron CONV_2D..."
     "$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_conv_fp16_android.cpp" -ldl -o "$EXE"
