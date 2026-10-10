@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # From Ubuntu/WSL: one ADB entry point for KataGo 10b on Android.
 # CPU/NNAPI/RKNN report NN-only latency; GPU uses the existing KataGo search benchmark.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'rc=$?; echo "ERROR: benchmark launcher failed at line $LINENO (exit $rc): $BASH_COMMAND" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB="${ADB:-adb}"
 ADB_ARGS=("$ADB")
@@ -29,9 +30,9 @@ fetch() {
 adb_cmd() { "${ADB_ARGS[@]}" "$@"; }
 command -v "$ADB" >/dev/null || { echo "ERROR: adb missing" >&2; exit 1; }
 command -v unzip >/dev/null || { echo "ERROR: unzip missing" >&2; exit 1; }
-adb_cmd get-state >/dev/null || exit 1
+adb_cmd get-state >/dev/null || { echo "ERROR: No usable ADB device. Check adb devices -l, permissions, and ADB_SERIAL." >&2; exit 1; }
 abi="$(adb_cmd shell getprop ro.product.cpu.abi | tr -d '\r')"
-soc="$(adb_cmd shell 'getprop ro.soc.model; getprop ro.board.platform; getprop ro.hardware; cat /proc/device-tree/compatible 2>/dev/null' | tr '\000' ' ')"
+soc="$(adb_cmd shell 'getprop ro.soc.model; getprop ro.board.platform; getprop ro.hardware; cat /proc/device-tree/compatible 2>/dev/null || true' | tr '\000' ' ')"
 brand="$(adb_cmd shell getprop ro.product.manufacturer | tr -d '\r')"
 serial="$(adb_cmd get-serialno | tr -d '\r')"
 echo "ADB: $serial manufacturer=$brand abi=$abi SOC=$soc"
