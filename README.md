@@ -164,3 +164,19 @@ bash build.sh
 - 默认使用 `--sample 1`，根据 MCTS 访问次数分布抽样落子，避免每盘走法完全相同。可设 `--sample 0` 强制选择搜索最高概率落点，结果通常高度重复。
 - `--seed` 控制对战抽样随机种子。双方可用不同隐藏层大小，但棋盘尺寸必须一致。
 - `init`、`match` 不会修改已有训练好的模型。
+
+## 可选：KataGo 10b RK3588 NPU 测速
+
+本项目自研 MiniGo 的训练和推理保持不变。额外提供 **KataGo 10b（19×19）** 的 ONNX→RKNN 转换及 RK3588 板端 NPU 神经网络推理测速工具（不含 MCTS 搜索）。
+
+- [转换步骤、安装依赖、测试说明](docs/KATAGO_RK3588_NPU.md)
+- [GitHub RKNN 模型发布页](https://github.com/rstg00po54/MiniGoCpp/releases/tag/katago-10b-rknn-v1)
+
+在 RK3588 Ubuntu 上：
+
+```bash
+git pull
+python3 -m pip install --user 'numpy<2' 'rknn-toolkit-lite2==2.3.2'
+bash tools/bench_rk3588_npu.sh
+```
+
