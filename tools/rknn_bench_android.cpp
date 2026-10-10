@@ -39,7 +39,9 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
         if (rknn_query(ctx, RKNN_QUERY_SDK_VERSION, &version, sizeof(version)) == RKNN_SUCC)
             std::printf("RKNN runtime: %s | NPU driver: %s\n", version.api_version, version.drv_version);
 
-        const rknn_core_mask mask = core == "0" ? RKNN_NPU_CORE_0 : RKNN_NPU_CORE_0_1_2;
+        const rknn_core_mask mask = core == "0" ? RKNN_NPU_CORE_0 : core == "1" ? RKNN_NPU_CORE_1 :
+                                    core == "2" ? RKNN_NPU_CORE_2 : core == "auto" ? RKNN_NPU_CORE_AUTO :
+                                    core == "01" ? RKNN_NPU_CORE_0_1 : RKNN_NPU_CORE_0_1_2;
         check(rknn_set_core_mask(ctx, mask), "rknn_set_core_mask");
 
         rknn_input_output_num io = {};
@@ -136,14 +138,14 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
 int main(int argc, char** argv) {
     try {
         if (argc < 2) {
-            std::fprintf(stderr, "Usage: %s MODEL.rknn [0|all] [warmup=20] [runs=100]\n", argv[0]);
+            std::fprintf(stderr, "Usage: %s MODEL.rknn [0|1|2|01|all|auto] [warmup=20] [runs=100]\n", argv[0]);
             return 2;
         }
         const std::string core = argc >= 3 ? argv[2] : "all";
         int warmup = argc >= 4 ? std::stoi(argv[3]) : 20;
         int runs = argc >= 5 ? std::stoi(argv[4]) : 100;
-        if ((core != "0" && core != "all") || warmup < 0 || runs <= 0 || runs > 1000000) {
-            throw std::runtime_error("core must be 0|all; warmup >= 0; 0 < runs <= 1000000");
+        if ((core != "0" && core != "1" && core != "2" && core != "01" && core != "all" && core != "auto") || warmup < 0 || runs <= 0 || runs > 1000000) {
+            throw std::runtime_error("core must be 0|1|2|01|all|auto; warmup >= 0; 0 < runs <= 1000000");
         }
         return benchmark(argv[1], core, warmup, runs);
     } catch (const std::exception& e) {
