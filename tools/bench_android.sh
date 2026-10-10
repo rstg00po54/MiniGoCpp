@@ -41,7 +41,9 @@ serial="$(adb_cmd get-serialno | tr -d '\r')"
 echo "ADB: $serial manufacturer=$brand abi=$abi SOC=$soc"
 [ "$abi" = arm64-v8a ] || { echo "ERROR: ARM64 Android only" >&2; exit 1; }
 if [ "$MODES" = auto ]; then
-    if [[ "${soc,,}" == *rk3588* ]]; then MODES="cpu nnapi rknn gpu";
+    if [ "$TARGET" = vivo ]; then MODES="npu";
+    elif [ "$TARGET" = rk ]; then MODES="rknn";
+    elif [[ "${soc,,}" == *rk3588* ]]; then MODES="cpu nnapi rknn gpu";
     elif [[ "${soc,,}" == *mt[0-9]* ]] || [[ "${brand,,}" == *mediatek* ]] || [[ "${brand,,}" == *vivo* ]]; then MODES="probe cpu nnapi gpu";
     else MODES="cpu nnapi gpu"; fi
 fi
