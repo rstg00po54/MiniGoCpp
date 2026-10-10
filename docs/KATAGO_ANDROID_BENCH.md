@@ -17,6 +17,21 @@ The probe uses `adb shell` to list public file names matching Neuron/APU librari
 
 MediaTek's dedicated NPU route involves **Neuron Adapter / Neuron Delegate / NeuroPilot**, generally with a supported TFLite model and appropriate vendor toolchain/runtime. ONNX Runtime's stock NNAPI execution provider is not the same as a MediaTek-specific acceleration execution provider. A working NPU test requires vendor-compatible conversion and an accessible runtime; until then this project does not claim native MT6993 NPU speed.
 
+## 多台 ADB 设备：按设备类型选择
+
+当 USB 和 Wi-Fi ADB 同时连接时，使用命令第一个参数指定设备类型，脚本通过 `getprop` 读取制造商与 SoC，不会依据设备列表顺序猜测：
+
+```bash
+bash tools/bench_android.sh vivo probe
+bash tools/bench_android.sh vivo cpu nnapi
+bash tools/bench_android.sh vivo npu
+bash tools/bench_android.sh rk rknn
+```
+
+`vivo` 匹配 vivo 制造商，`rk` 匹配 RK3588/RK3588S SoC。只连接一台设备可省略类型，多台设备不指定类型会安全报错。如果同一种类型有多个 ADB 连接，优先选择 USB；若想强制选择 Wi-Fi，使用 `ADB_SERIAL=192.168.0.184:5555`。
+
+**重点**：当前 `vivo npu` 仅检查 MediaTek Neuron/APU 组件，并明确报告尚未接通厂商加速推理，**不会返回假的 NPU 速度**。先前手机 ONNX Runtime NNAPI 测试结果 `NNAPI_nodes=0`，因此不能作为 MT6993 NPU 测速。需要完成 Neuron/LiteRT 模型转换和适配后才能取得真实 NPU 延迟。实际能跑 RKNN 的是 `rk rknn` 模式。
+
 ## Quick start
 
 ```bash
