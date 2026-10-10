@@ -2,6 +2,28 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## MT6993 MDLA: convolution test after FP32 ADD was rejected
+
+On vivo V2502A, Native Neuron SDK **9.2.0** enumerated `mtk-dsp` and `mtk-mdla`. For one 64-element `NEURON_ADD` graph:
+
+- `mtk-dsp`: operation supported, device-specific compilation and numerical validation passed, **1.010 ms** for one end-to-end call.
+- `mtk-mdla`: **`NEURON_ADD` unsupported** for that specific graph and data type, so inference did not run. This does not imply every ADD or CONV graph is unsupported.
+
+New direct CONV_2D experiment attempts a **device-constrained** one-layer NHWC `1×19×19×16 → 1×19×19×16` 3×3 convolution (16 output filters, constant weights/biases; approximately 0.83M multiply-accumulates), with `NeuronModel_relaxComputationFloat32toFloat16(true)`. It queries per-device support, compiles, executes, validates all 5,776 output values against analytically calculated values, and reports mean/P50/P95 only upon success.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_conv.sh mtk-mdla
+bash tools/bench_mediatek_conv.sh mtk-dsp
+# Alternative using unified device selector:
+bash tools/bench_android.sh vivo conv
+# Longer test:
+WARMUP=50 RUNS=500 bash tools/bench_mediatek_conv.sh mtk-mdla
+```
+
+A successful `NEURON_CONV_PASS` would be useful evidence that Neuron Adapter can compile and execute a convolution on the explicitly selected MDLA device, **not that KataGo 10b has been deployed or that the measured calls/s equal KataGo NN evals/s**. MediaTek's [MDLA guidelines](https://genio.mediatek.com/doc/iot-yocto/release/v25.0/sw/yocto/ml-guide/neuron-sdk/mt8188/supported-operations/mdla-guide/mdla_guidelines_3_0.html) discuss layout, precision and internal buffer constraints; they are generic and not guaranteed to describe the MT6993's exact hardware.
+
 ## vivo Neuron Adapter native API smoke (NPU integration stage)
 
 The vivo MT6993 diagnostic reported the following OEM-installed libraries:
