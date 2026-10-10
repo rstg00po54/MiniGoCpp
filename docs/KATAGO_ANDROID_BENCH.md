@@ -2,6 +2,35 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+## vivo Neuron Adapter native API smoke (NPU integration stage)
+
+The vivo MT6993 diagnostic reported the following OEM-installed libraries:
+
+```text
+/system_ext/lib64/libneuron_graph_delegate.mtk.so
+/system_ext/lib64/libneuronusdk_adapter.mtk.so
+/system_ext/lib64/libneuronusdk_adapter.9.mtk.so
+/vendor/lib64/libneuron_runtime.9.so
+```
+
+Those files are stronger evidence of a MediaTek vendor acceleration runtime than the stock NNAPI CPU reference driver, **but file presence does not prove ordinary `adb shell` can load the libraries or that KataGo can run on the APU**.
+
+An experimental native probe now calls the official MediaTek Neuron Adapter symbols with `dlopen()/dlsym()`, builds a tiny 64-element FP32 ADD graph and checks outputs:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+bash tools/bench_mediatek_neuron.sh
+# or unified selector (returns nonzero until KataGo NPU is implemented):
+bash tools/bench_android.sh vivo npu
+```
+
+The probe uses ADB device auto-selection to pick your vivo and the existing Android NDK 27.2.12479018 to compile `tools/neuron_smoke_android.cpp`. It requires no root, no model downloads, and no separate Neuron SDK headers (only documented public ABI definitions). It checks these stages: `dlopen`, Neuron symbols, version, `NeuronModel_create`, `NeuronCompilation_finish`, `NeuronExecution_compute`, and numerical equality. A failure means the stage reported is not yet accessible/supported; it is **not** a definite statement that the NPU cannot be used via an APK.
+
+`NEURON_ADAPTER_SMOKE_PASS` means a tiny Neuron Adapter graph compiled and computed correctly, **not** that the MediaTek NPU (as opposed to a CPU fallback) ran, and **not** that a KataGo 10b graph ran. For real KataGo 10b NN eval/s, convert to compatible LiteRT/TFLite and use a validated MediaTek delegate/compiler with accelerator verification and matching numerical outputs.
+
+MediaTek's [Neuron Adapter C API tutorial](https://developer.mediatek.com/ai/64254ccbf55b040d6989a99a.html) lists the C symbols used here. Google's [LiteRT MediaTek adapter](https://github.com/google-ai-edge/LiteRT/blob/main/litert/vendors/mediatek/neuron_adapter_api.cc) also recognizes the `libneuronusdk_adapter.mtk.so` and versioned adapter libraries.
+
 ## MediaTek MT6993: what the NNAPI result means
 
 Observed on vivo X300 Pro / MT6993 (Android): only `NNAPI[0]: nnapi-reference type=CPU` is enumerated and the ONNX Runtime profile reports `NNAPI_nodes=0`. This means standard NNAPI did **not** use an accelerator in that test. The `nnapi` runtime result is CPU fallback, not a MediaTek NPU measurement. Profiling overhead differs from the unprofiled CPU mode, so the two latency figures are not a tightly controlled CPU-vs-CPU performance comparison.
@@ -30,7 +59,7 @@ bash tools/bench_android.sh rk rknn
 
 `vivo` 匹配 vivo 制造商，`rk` 匹配 RK3588/RK3588S SoC。只连接一台设备可省略类型，多台设备不指定类型会安全报错。如果同一种类型有多个 ADB 连接，优先选择 USB；若想强制选择 Wi-Fi，使用 `ADB_SERIAL=192.168.0.184:5555`。
 
-**重点**：当前 `vivo npu` 仅检查 MediaTek Neuron/APU 组件，并明确报告尚未接通厂商加速推理，**不会返回假的 NPU 速度**。先前手机 ONNX Runtime NNAPI 测试结果 `NNAPI_nodes=0`，因此不能作为 MT6993 NPU 测速。需要完成 Neuron/LiteRT 模型转换和适配后才能取得真实 NPU 延迟。实际能跑 RKNN 的是 `rk rknn` 模式。
+**重点**：当前 `vivo npu` 检查 MediaTek Neuron/APU 组件，并尝试运行一个很小的 Neuron Adapter FP32 ADD 图，**还不是 KataGo 10b NPU 测速**。先前手机 ONNX Runtime NNAPI 测试结果 `NNAPI_nodes=0`，因此不能作为 MT6993 NPU 测速。需要完成 Neuron/LiteRT 模型转换和适配后才能取得真实 NPU 延迟。实际能跑 RKNN 的是 `rk rknn` 模式。
 
 ## Quick start
 
