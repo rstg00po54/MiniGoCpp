@@ -26,7 +26,7 @@ MiniGoCpp/
 sudo apt install -y build-essential cmake git
 git clone https://github.com/rstg00po54/MiniGoCpp.git
 cd MiniGoCpp
-./build.sh
+bash build.sh
 ```
 
 仓库不附带预训练模型，请先按第 2 节从零训练，生成 `models/my3.bin` 后再执行 `play` / `eval` / `inspect`。
