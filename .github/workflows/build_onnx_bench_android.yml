@@ -1,0 +1,53 @@
+name: Build Android ONNX CPU NNAPI benchmark
+
+on:
+  push:
+    paths:
+      - 'tools/onnx_bench_android.cpp'
+      - 'tools/bench_android.sh'
+      - '.github/workflows/build_onnx_bench_android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install NDK and ONNX Runtime Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install 'ndk;27.2.12479018'
+          mkdir -p build/ort_android
+          curl -fL --retry 3 -o build/ort_android/onnxruntime.aar \
+            https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.23.2/onnxruntime-android-1.23.2.aar
+          unzip -l build/ort_android/onnxruntime.aar | grep -E 'headers/onnxruntime_cxx_api.h|headers/onnxruntime_c_api.h|jni/arm64-v8a/libonnxruntime.so'
+          unzip -p build/ort_android/onnxruntime.aar jni/arm64-v8a/libonnxruntime.so > build/ort_android/libonnxruntime.so
+          unzip -oq build/ort_android/onnxruntime.aar 'headers/*' -d build/ort_android
+      - name: Compile ARM64 ONNX benchmark and check shell script
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tools/bench_android.sh
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+          "$CXX" -std=c++17 -O2 -fPIE -pie -Ibuild/ort_android/headers tools/onnx_bench_android.cpp \
+            -Lbuild/ort_android -lonnxruntime -lneuralnetworks -llog -ldl -Wl,-rpath,'$ORIGIN' \
+            -o build/ort_android/onnx_bench_android
+          file build/ort_android/onnx_bench_android
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-onnx-bench-arm64
+          path: build/ort_android/onnx_bench_android
+          if-no-files-found: ignore
