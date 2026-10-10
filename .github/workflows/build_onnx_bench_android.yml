@@ -24,6 +24,9 @@ on:
       - 'tools/export_katago_residual_stack.py'
       - 'tools/neuron_katago_residual_stack_android.cpp'
       - 'tools/bench_mediatek_katago_residual_stack.sh'
+      - 'tools/export_katago_rconv5_gpool.py'
+      - 'tools/neuron_katago_rconv5_gpool_android.cpp'
+      - 'tools/bench_mediatek_katago_rconv5_gpool.sh'
       - 'tools/neuron_katago_first_conv_android.cpp'
       - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
@@ -117,6 +120,11 @@ jobs:
           grep -Fq '"chmod 755 $REMOTE/neuron_katago_residual_stack_android"' tools/bench_mediatek_katago_residual_stack.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_residual_stack_android.cpp -ldl -o build/neuron_android/neuron_katago_residual_stack_android
           file build/neuron_android/neuron_katago_residual_stack_android
+          bash -n tools/bench_mediatek_katago_rconv5_gpool.sh
+          grep -Fq '"$ROOT/tools/neuron_katago_rconv5_gpool_android.cpp"' tools/bench_mediatek_katago_rconv5_gpool.sh
+          grep -Fq '"$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_katago_rconv5_gpool_android.cpp" -ldl -o "$BIN"' tools/bench_mediatek_katago_rconv5_gpool.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_rconv5_gpool_android.cpp -ldl -o build/neuron_android/neuron_katago_rconv5_gpool_android
+          file build/neuron_android/neuron_katago_rconv5_gpool_android
       - name: Validate KataGo ONNX first Conv exporter on real model
         shell: bash
         run: |
@@ -186,6 +194,17 @@ jobs:
               assert len(b)==28+2*(h*w*c+n*(4*c+2*c*k*k*c))+4*h*w*c, len(b)
               print("PASS Python3.8 real KataGo residual stack",n,"blocks",len(b),"bytes")
           PY
+          python tools/export_katago_rconv5_gpool.py --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_rconv5_gpool.bin
+          python - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path("build/neuron_android/katago_rconv5_gpool.bin")
+          contents=p.read_bytes()
+          magic,h,w,ci,co=struct.unpack("<8s4I",contents[:24])
+          expected=24+2*(1+h*w*ci+co*co)+4*co
+          assert magic==b"K10GP001" and (h,w,ci,co)==(19,19,32,96), (magic,h,w,ci,co)
+          assert len(contents)==expected, (len(contents),expected)
+          print("PASS KataGo actual global pooling w1r ONNX packet",len(contents))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -205,4 +224,6 @@ jobs:
             build/neuron_android/neuron_katago_residual_stack_android
             build/neuron_android/katago_residual_stack1.bin
             build/neuron_android/katago_residual_stack4.bin
+            build/neuron_android/neuron_katago_rconv5_gpool_android
+            build/neuron_android/katago_rconv5_gpool.bin
           if-no-files-found: ignore
