@@ -25,6 +25,17 @@ bash tools/bench_mediatek_neuron.sh
 bash tools/bench_android.sh vivo npu
 ```
 
+The probe now also uses `Neuron_getDeviceCount` / `NeuronDevice_getName` to list actual **Neuron devices**; this is independent of `ANeuralNetworks_getDeviceCount` and stock NNAPI. To constrain compilation to one enumerated device name after the first run:
+
+```bash
+bash tools/bench_mediatek_neuron.sh
+bash tools/bench_mediatek_neuron.sh EXACT_NEURON_DEVICE_NAME
+# Or from the existing unified launcher:
+NEURON_DEVICE_NAME=EXACT_NEURON_DEVICE_NAME bash tools/bench_android.sh vivo npu
+```
+
+When a specific device is supplied, the program checks `NeuronModel_getSupportedOperationsForDevices` (if exported) and uses `NeuronCompilation_createForDevices` instead of automatic fallback. This is a stronger check of target selection, but a 64-element ADD remains a tiny graph and does not establish KataGo performance.
+
 The probe uses ADB device auto-selection to pick your vivo and the existing Android NDK 27.2.12479018 to compile `tools/neuron_smoke_android.cpp`. It requires no root, no model downloads, and no separate Neuron SDK headers (only documented public ABI definitions). It checks these stages: `dlopen`, Neuron symbols, version, `NeuronModel_create`, `NeuronCompilation_finish`, `NeuronExecution_compute`, and numerical equality. A failure means the stage reported is not yet accessible/supported; it is **not** a definite statement that the NPU cannot be used via an APK.
 
 `NEURON_ADAPTER_SMOKE_PASS` means a tiny Neuron Adapter graph compiled and computed correctly, **not** that the MediaTek NPU (as opposed to a CPU fallback) ran, and **not** that a KataGo 10b graph ran. For real KataGo 10b NN eval/s, convert to compatible LiteRT/TFLite and use a validated MediaTek delegate/compiler with accelerator verification and matching numerical outputs.
