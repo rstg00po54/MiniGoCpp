@@ -46,7 +46,7 @@ fi
 if [ ! -s "$PACKET" ] || [ "$ROOT/tools/export_katago_residual_conv.py" -nt "$PACKET" ] || \
    [ "$MODEL" -nt "$PACKET" ] || [ "${FORCE_EXPORT:-0}" = 1 ]; then
     echo "Extracting real KataGo residual $NODE and upstream ONNX CPU reference..."
-    "$PYTHON" "$ROOT/tools/export_katago_first_conv.py" --model "$MODEL" --out "$PACKET" --node "$NODE"
+    "$PYTHON" "$ROOT/tools/export_katago_residual_conv.py" --model "$MODEL" --out "$PACKET" --node "$NODE"
 fi
 
 NDK_DIR="${NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
