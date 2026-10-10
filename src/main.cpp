@@ -30,6 +30,8 @@ void usage() {
     std::cout << "MiniGoCpp: handcrafted C++ Go engine + residual neural network + backprop + MCTS\n\n"
               << "  ./minigo train --size 3 --games 100 --sims 24 --hidden 32 --epochs 2 --out models/go3.bin\n"
               << "  ./minigo train --size 3 --games 100 --sims 24 --model models/go3.bin --out models/go3.bin\n"
+              << "  ./minigo init --size 3 --hidden 16 --seed 42 --out models/initial3.bin\n"
+              << "  ./minigo match --black models/my3.bin --white models/initial3.bin --games 100 --sims 24 --alternate 1\n"
               << "  ./minigo play  --model models/go3.bin --sims 80\n"
               << "  ./minigo eval  --model models/go3.bin --games 100 --sims 40\n"
               << "  ./minigo inspect --model models/go3.bin\n\n"
@@ -42,6 +44,64 @@ void usage() {
 Network makeNetwork(const Options& opts) {
     if (opts.args.count("--model")) return Network::load(opts.get("--model", ""));
     return Network(opts.number("--size",3), opts.number("--hidden",32), uint32_t(opts.number("--seed",42)));
+}
+
+void initializeModel(const Options& o) {
+    if (!o.args.count("--out")) throw std::invalid_argument("init requires --out FILE");
+    if (o.args.count("--model")) throw std::invalid_argument("init creates a new model; omit --model");
+    Network net = makeNetwork(o);
+    std::string out = o.get("--out", "");
+    if (std::filesystem::exists(out) && o.number("--force",0) != 1)
+        throw std::runtime_error("model already exists; use --force 1 to overwrite: " + out);
+    std::filesystem::path p(out);
+    if (!p.parent_path().empty()) std::filesystem::create_directories(p.parent_path());
+    if (!net.save(out)) throw std::runtime_error("unable to save initial model: " + out);
+    std::cout << "Initialized " << net.size() << "x" << net.size() << " hidden=" << net.hidden()
+              << " parameters=" << net.parameterCount() << " seed=" << o.number("--seed",42)
+              << " -> " << out << '\n';
+}
+
+void matchModels(const Options& o) {
+    if (!o.args.count("--black") || !o.args.count("--white"))
+        throw std::invalid_argument("match requires --black FILE and --white FILE");
+    std::string nameA = o.get("--black",""), nameB = o.get("--white","");
+    Network a = Network::load(nameA), b = Network::load(nameB);
+    if (a.size() != b.size()) throw std::invalid_argument("model board sizes differ");
+    int games = o.number("--games",100), sims = o.number("--sims",24);
+    bool alternate = o.number("--alternate",0) != 0;
+    bool sample = o.number("--sample",1) != 0;
+    if (games <= 0 || sims < 2) throw std::invalid_argument("games must be positive; sims >= 2");
+    std::mt19937 rng(uint32_t(o.number("--seed",1234)));
+    int winsA = 0, winsB = 0, draws = 0, blackWins = 0, whiteWins = 0;
+    int firstAAsBlack = 0, firstAAsBlackWins = 0, firstAAsWhite = 0, firstAAsWhiteWins = 0;
+    for (int game=0; game<games; ++game) {
+        bool aBlack = !alternate || game%2==0;
+        if (aBlack) ++firstAAsBlack; else ++firstAAsWhite;
+        Board board(a.size(), o.real("--komi",0.5f));
+        while (!board.terminal()) {
+            const Network& net = (board.player()==1) == aBlack ? a : b;
+            auto result = searchMCTS(board,net,sims);
+            int move = chooseMove(result.policy,rng,sample);
+            if (!board.play(move)) throw std::runtime_error("match generated illegal move");
+        }
+        int winner = board.winner();
+        if (winner==1) ++blackWins; else if (winner==-1) ++whiteWins;
+        int resultA = winner * (aBlack ? 1 : -1);
+        if (resultA>0) { ++winsA; if (aBlack) ++firstAAsBlackWins; else ++firstAAsWhiteWins; }
+        else if (resultA<0) ++winsB;
+        else ++draws;
+    }
+    std::cout << "Match " << a.size() << "x" << a.size() << " games=" << games << " sims=" << sims
+              << " komi=" << o.real("--komi",0.5f) << " alternate=" << alternate
+              << " sample=" << sample << '\n';
+    std::cout << "Model A: " << nameA << '\n' << "Model B: " << nameB << '\n';
+    std::cout << "Model A " << winsA << " wins, Model B " << winsB << " wins, draws " << draws
+              << " (A score " << std::fixed << std::setprecision(1)
+              << (100.0*(winsA+0.5*draws)/games) << "%)\n";
+    std::cout << "Board colors: black " << blackWins << " wins, white " << whiteWins
+              << " wins, draws " << draws << '\n';
+    std::cout << "A as black: " << firstAAsBlackWins << "/" << firstAAsBlack
+              << " wins; A as white: " << firstAAsWhiteWins << "/" << firstAAsWhite << " wins\n";
 }
 
 TrainingSample record(const Board& b, const SearchResult& result) {
@@ -180,6 +240,8 @@ int main(int argc, char** argv) {
         if (command=="help" || command=="--help") { usage(); return 0; }
         Options o(argc,argv);
         if (command=="train") train(o);
+        else if (command=="init") initializeModel(o);
+        else if (command=="match") matchModels(o);
         else if (command=="play") interactive(o);
         else if (command=="eval") evaluate(o);
         else if (command=="inspect") inspect(o);
