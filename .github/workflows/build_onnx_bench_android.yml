@@ -12,6 +12,9 @@ on:
       - 'tools/bench_mediatek_conv.sh'
       - 'tools/bench_mediatek_conv_fp16.sh'
       - 'tools/neuron_conv_fp16_android.cpp'
+      - 'tools/export_katago_first_conv.py'
+      - 'tools/neuron_katago_first_conv_android.cpp'
+      - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
       - 'tools/test_bench_android_smoke.sh'
       - '.github/workflows/build_onnx_bench_android.yml'
@@ -76,6 +79,25 @@ jobs:
           grep -Fq '"chmod 755 $REMOTE/neuron_conv_fp16_android"' tools/bench_mediatek_conv_fp16.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_conv_fp16_android.cpp -ldl -o build/neuron_android/neuron_conv_fp16_android
           file build/neuron_android/neuron_conv_fp16_android
+          bash -n tools/bench_mediatek_katago_first_conv.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_first_conv_android.cpp -ldl -o build/neuron_android/neuron_katago_first_conv_android
+          file build/neuron_android/neuron_katago_first_conv_android
+      - name: Validate KataGo ONNX first Conv exporter on real model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user 'numpy==1.24.4' 'onnx==1.16.2' 'onnxruntime==1.19.2'
+          curl -fL --retry 3 -o build/ort_android/10b_19x19.onnx \
+            https://github.com/rstg00po54/go/releases/download/katago-10b-onnx-v1/10b_19x19.onnx
+          python3 tools/export_katago_first_conv.py \
+            --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_first_conv.bin
+          python3 - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path("build/neuron_android/katago_first_conv.bin")
+          magic,*a=struct.unpack("<8s12I",p.read_bytes()[:56])
+          assert magic==b"K10CV001" and a[2]>0 and a[3]>0 and a[10]>0 and a[11]>0
+          print("Validated ONNX first Conv extracted packet:", a, p.stat().st_size)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -85,4 +107,6 @@ jobs:
             build/neuron_android/neuron_smoke_android
             build/neuron_android/neuron_conv_android
             build/neuron_android/neuron_conv_fp16_android
+            build/neuron_android/neuron_katago_first_conv_android
+            build/neuron_android/katago_first_conv.bin
           if-no-files-found: ignore
