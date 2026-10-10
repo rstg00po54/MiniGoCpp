@@ -18,6 +18,9 @@ on:
       - 'tools/bench_mediatek_katago_residual_conv.sh'
       - 'tools/bench_mediatek_residual_add.sh'
       - 'tools/neuron_residual_add_android.cpp'
+      - 'tools/export_katago_rconv1_block.py'
+      - 'tools/neuron_katago_rconv1_android.cpp'
+      - 'tools/bench_mediatek_katago_rconv1.sh'
       - 'tools/neuron_katago_first_conv_android.cpp'
       - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
@@ -92,6 +95,12 @@ jobs:
           grep -Fq '"chmod 755 $REMOTE/neuron_residual_add_android"' tools/bench_mediatek_residual_add.sh
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_residual_add_android.cpp -ldl -o build/neuron_android/neuron_residual_add_android
           file build/neuron_android/neuron_residual_add_android
+          bash -n tools/bench_mediatek_katago_rconv1.sh
+          grep -Fq '"$ROOT/tools/export_katago_rconv1_block.py"' tools/bench_mediatek_katago_rconv1.sh
+          grep -Fq '"$ROOT/tools/neuron_katago_rconv1_android.cpp"' tools/bench_mediatek_katago_rconv1.sh
+          grep -Fq '"chmod 755 $REMOTE/neuron_katago_rconv1_android"' tools/bench_mediatek_katago_rconv1.sh
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/neuron_katago_rconv1_android.cpp -ldl -o build/neuron_android/neuron_katago_rconv1_android
+          file build/neuron_android/neuron_katago_rconv1_android
       - name: Validate KataGo ONNX first Conv exporter on real model
         shell: bash
         run: |
@@ -139,6 +148,16 @@ jobs:
               assert magic==b"K10CV001" and v==[19,19,128,128,3,3,1,1,1,1,19,19], (node,v)
               print("PASS real first residual Conv",node,"bytes",p.stat().st_size)
           PY
+          python tools/export_katago_rconv1_block.py --model build/ort_android/10b_19x19.onnx --out build/neuron_android/katago_rconv1_full.bin
+          python - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path("build/neuron_android/katago_rconv1_full.bin")
+          b=p.read_bytes()
+          magic,h,w,c,k=struct.unpack("<8s4I",b[:24])
+          size=24+2*(h*w*c+4*c+2*c*k*k*c)+4*h*w*c
+          assert magic==b"K10RB001" and (h,w,c,k)==(19,19,128,3) and len(b)==size, (magic,h,w,c,k,len(b),size)
+          print("PASS real KataGo full rconv1 residual packet",len(b))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -153,4 +172,6 @@ jobs:
             build/neuron_android/rconv1_w1.bin
             build/neuron_android/rconv1_w2.bin
             build/neuron_android/neuron_residual_add_android
+            build/neuron_android/neuron_katago_rconv1_android
+            build/neuron_android/katago_rconv1_full.bin
           if-no-files-found: ignore
