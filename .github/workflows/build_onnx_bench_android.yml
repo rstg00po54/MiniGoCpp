@@ -14,6 +14,8 @@ on:
       - 'tools/neuron_conv_fp16_android.cpp'
       - 'tools/export_katago_first_conv.py'
       - 'tools/inspect_katago_onnx.py'
+      - 'tools/export_katago_residual_conv.py'
+      - 'tools/bench_mediatek_katago_residual_conv.sh'
       - 'tools/neuron_katago_first_conv_android.cpp'
       - 'tools/bench_mediatek_katago_first_conv.sh'
       - 'tools/probe_mediatek_npu.sh'
@@ -117,6 +119,17 @@ jobs:
           magic,*a=struct.unpack("<8s12I",p.read_bytes()[:56])
           assert magic==b"K10CV001" and a==[19,19,22,128,5,5,2,2,2,2,19,19], a
           print("PASS Python3.8 ONNX Runtime 1.16.3: real KataGo first Conv",a)
+          bash -n tools/bench_mediatek_katago_residual_conv.sh
+          python tools/export_katago_residual_conv.py --model build/ort_android/10b_19x19.onnx --node rconv1/w1 --out build/neuron_android/rconv1_w1.bin
+          python tools/export_katago_residual_conv.py --model build/ort_android/10b_19x19.onnx --node rconv1/w2 --out build/neuron_android/rconv1_w2.bin
+          python - <<'PY'
+          import pathlib,struct
+          for node in ("w1","w2"):
+              p=pathlib.Path("build/neuron_android/rconv1_"+node+".bin")
+              magic,*v=struct.unpack("<8s12I",p.read_bytes()[:56])
+              assert magic==b"K10CV001" and v==[19,19,128,128,3,3,1,1,1,1,19,19], (node,v)
+              print("PASS real first residual Conv",node,"bytes",p.stat().st_size)
+          PY
           PY
       - uses: actions/upload-artifact@v4
         if: always()
@@ -129,4 +142,6 @@ jobs:
             build/neuron_android/neuron_conv_fp16_android
             build/neuron_android/neuron_katago_first_conv_android
             build/neuron_android/katago_first_conv.bin
+            build/neuron_android/rconv1_w1.bin
+            build/neuron_android/rconv1_w2.bin
           if-no-files-found: ignore
