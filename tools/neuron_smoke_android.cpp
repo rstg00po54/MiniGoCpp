@@ -12,6 +12,7 @@
 #include <vector>
 
 struct NeuronModel;
+struct NeuronDevice;
 struct NeuronCompilation;
 struct NeuronExecution;
 struct NeuronRuntimeVersion { uint8_t major, minor, patch; };
@@ -36,7 +37,7 @@ static void check(int rc, const char* name) {
     if (rc != NEURON_NO_ERROR) throw std::runtime_error(std::string(name) + " returned " + std::to_string(rc));
 }
 
-static int run(void* library) {
+static int run(void* library, const std::string& requestedDevice) {
     auto get_version = get<int (*)(NeuronRuntimeVersion*)>(library, "Neuron_getVersion");
     auto model_create = get<int (*)(NeuronModel**)>(library, "NeuronModel_create");
     auto model_free = get<void (*)(NeuronModel*)>(library, "NeuronModel_free");
@@ -53,6 +54,40 @@ static int run(void* library) {
     auto exec_output = get<int (*)(NeuronExecution*, int32_t, const NeuronOperandType*, void*, size_t)>(library, "NeuronExecution_setOutput");
     auto exec_compute = get<int (*)(NeuronExecution*)>(library, "NeuronExecution_compute");
     auto exec_free = get<void (*)(NeuronExecution*)>(library, "NeuronExecution_free");
+
+    // Neuron device enumeration is separate from Android's legacy NNAPI devices.
+    // A Neuron API session alone does not prove that the ADD graph used hardware.
+    auto device_count = reinterpret_cast<int (*)(uint32_t*)>(dlsym(library, "Neuron_getDeviceCount"));
+    auto get_device = reinterpret_cast<int (*)(uint32_t, NeuronDevice**)>(dlsym(library, "Neuron_getDevice"));
+    auto get_device_name = reinterpret_cast<int (*)(const NeuronDevice*, const char**)>(dlsym(library, "NeuronDevice_getName"));
+    auto create_for_devices = reinterpret_cast<int (*)(NeuronModel*, const NeuronDevice* const*, uint32_t, NeuronCompilation**)>(
+        dlsym(library, "NeuronCompilation_createForDevices"));
+    auto supported_for_devices = reinterpret_cast<int (*)(const NeuronModel*, const NeuronDevice* const*, uint32_t, bool*)>(
+        dlsym(library, "NeuronModel_getSupportedOperationsForDevices"));
+
+    NeuronDevice* selectedDevice = nullptr;
+    if (!device_count || !get_device || !get_device_name) {
+        std::puts("Neuron device enumeration API not exported; cannot verify hardware device selection.");
+        if (!requestedDevice.empty()) throw std::runtime_error("Explicit device requires Neuron device enumeration symbols");
+    } else {
+        uint32_t count = 0;
+        check(device_count(&count), "Neuron_getDeviceCount");
+        std::printf("Neuron devices: %u\n", count);
+        if (count > 64) throw std::runtime_error("Unreasonable device count");
+        for (uint32_t i = 0; i < count; i++) {
+            NeuronDevice* dev = nullptr;
+            const char* name = nullptr;
+            int rc = get_device(i, &dev);
+            if (rc == NEURON_NO_ERROR && dev) rc = get_device_name(dev, &name);
+            std::printf("Neuron device[%u]: %s (status=%d)\n", i, name ? name : "(unavailable)", rc);
+            if (rc == NEURON_NO_ERROR && name && requestedDevice == name) selectedDevice = dev;
+        }
+    }
+    if (!requestedDevice.empty() && !selectedDevice)
+        throw std::runtime_error("Neuron device not found: " + requestedDevice);
+    if (selectedDevice && !create_for_devices)
+        throw std::runtime_error("NeuronCompilation_createForDevices not exported");
+    std::fflush(stdout);
 
     NeuronRuntimeVersion version = {};
     check(get_version(&version), "Neuron_getVersion");
@@ -85,7 +120,24 @@ static int run(void* library) {
 
         std::printf("Compiling Neuron Adapter FP32 ADD graph...\n");
         std::fflush(stdout);
-        check(comp_create(model, &comp), "NeuronCompilation_create");
+        if (selectedDevice) {
+            if (supported_for_devices) {
+                const NeuronDevice* devices[] = {selectedDevice};
+                bool supported = false;
+                check(supported_for_devices(model, devices, 1, &supported), "NeuronModel_getSupportedOperationsForDevices");
+                std::printf("Selected Neuron device '%s' ADD op supported=%s\n",
+                            requestedDevice.c_str(), supported ? "yes" : "no");
+                if (!supported) throw std::runtime_error("Selected Neuron device reports unsupported ADD operation");
+            } else {
+                std::puts("Neuron per-device support query not exported; compilation will decide.");
+            }
+            const NeuronDevice* devices[] = {selectedDevice};
+            check(create_for_devices(model, devices, 1, &comp), "NeuronCompilation_createForDevices");
+            std::printf("Neuron compilation constrained to device '%s'.\n", requestedDevice.c_str());
+        } else {
+            check(comp_create(model, &comp), "NeuronCompilation_create");
+            std::puts("Neuron compilation used automatic device selection; may use fallback.");
+        }
         if (!comp) throw std::runtime_error("Compilation handle is null");
         check(comp_finish(comp), "NeuronCompilation_finish");
 
@@ -117,7 +169,12 @@ static int run(void* library) {
     return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 2) {
+        std::fprintf(stderr, "Usage: %s [NeuronDeviceName]\n", argv[0]);
+        return 2;
+    }
+    const std::string requestedDevice = argc == 2 ? argv[1] : "";
     const char* libraries[] = {
         "libneuronusdk_adapter.9.mtk.so",
         "libneuronusdk_adapter.mtk.so",
@@ -135,7 +192,7 @@ int main() {
         std::printf("Loaded Neuron library: %s\n", name);
         std::fflush(stdout);
         try {
-            int code = run(library);
+            int code = run(library, requestedDevice);
             dlclose(library);
             return code;
         } catch (const std::exception& e) {
