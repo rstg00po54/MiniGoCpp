@@ -30,7 +30,7 @@ mkdir -p "$CACHE"
 EXE="$CACHE/neuron_conv_fp16_android"
 if [ ! -x "$EXE" ] || [ "$ROOT/tools/neuron_conv_fp16_android.cpp" -nt "$EXE" ]; then
     echo "Compiling Android ARM64 Neuron CONV_2D..."
-    "$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_conv_android.cpp" -ldl -o "$EXE"
+    "$CXX" -std=c++17 -O2 -fPIE -pie "$ROOT/tools/neuron_conv_fp16_android.cpp" -ldl -o "$EXE"
 fi
 
 REMOTE="/data/local/tmp/minigocpp_neuron"
@@ -39,7 +39,7 @@ echo "ADB device: $ADB_SERIAL; Neuron device: $DEVICE; precision: $PRECISION"
 "${ADB_ARGS[@]}" push "$EXE" "$REMOTE/neuron_conv_fp16_android" >/dev/null
 CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 [ ! -s "$CPP_LIB" ] || "${ADB_ARGS[@]}" push "$CPP_LIB" "$REMOTE/libc++_shared.so" >/dev/null
-"${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/neuron_conv_android"
+"${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/neuron_conv_fp16_android"
 echo "Testing NHWC 9x9 3x3 CONV_2D ($PRECISION native); NOT KataGo NN evals/s."
 CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_conv_fp16_android $DEVICE $PRECISION $WARMUP $RUNS"
 if command -v timeout >/dev/null 2>&1; then
