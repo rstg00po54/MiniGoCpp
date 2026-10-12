@@ -38,7 +38,7 @@ echo "=== GPU: KataGo official OpenCL benchmarknn (NN-only, native features) ===
 if ! GPU_RUNS="$GPU_RUNS" GPU_WARMUP="$GPU_WARMUP" bash "$ROOT/tools/bench_rk3588_gpu_katago.sh" > "$OUT/gpu.log" 2>&1; then
     failed=1
 fi
-grep -E 'Using OpenCL backend|KATAGO_NATIVE_(PRECHECK|START)|actualWallNNEvalsPerSec|ERROR|Unrecognized' "$OUT/gpu.log" || true
+grep -E 'Using OpenCL backend|KATAGO_(NATIVE|OFFICIAL|OPENCL_LINK)|actualWallNNEvalsPerSec|ERROR|Unrecognized|Fatal|fatal' "$OUT/gpu.log" | tail -55 || true
 
 echo "=== NPU: RKNPU2 core 0, entire RKNN 10b, input layout=$RKNN_INPUT_LAYOUT ==="
 if ! CORE_MODES=0 bash "$ROOT/tools/bench_rk3588_npu.sh" > "$OUT/npu.log" 2>&1; then
