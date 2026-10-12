@@ -48,6 +48,22 @@ if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
         if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
     done
 fi
+# Reuse a previously staged Android command-line KataGo when available.
+if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
+    for candidate in "$REMOTE/katago" "/data/local/tmp/katago/katago" "/data/local/tmp/katago_native/katago"; do
+        if "${ADB_ARGS[@]}" shell "test -f $candidate" >/dev/null 2>&1; then
+            REMOTE_BIN="$candidate"; break
+        fi
+    done
+fi
+if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
+    for candidate in "$REMOTE/model.bin.gz" "/data/local/tmp/katago/model.bin.gz" \
+                     "/data/local/tmp/katago_native/model.bin.gz"; do
+        if "${ADB_ARGS[@]}" shell "test -s $candidate" >/dev/null 2>&1; then
+            REMOTE_MODEL="$candidate"; break
+        fi
+    done
+fi
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
     echo "ERROR: KataGo Android native executable not found." >&2
     echo "Set KATAGO_BIN=/path/to/Android/arm64/katago or KATAGO_REMOTE_BIN=/data/local/tmp/.../katago." >&2
