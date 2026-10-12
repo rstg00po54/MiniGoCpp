@@ -13,6 +13,7 @@ on:
       - 'tools/bench_rk3588_compare.sh'
       - 'tools/bench_rk3588_gpu_full.sh'
       - 'tools/bench_rk3588_gpu_ab.sh'
+      - 'tools/test_rk3588_gpu_tile.py'
       - 'tools/bench_rk3588_npu.sh'
       - 'tools/bench_android.sh'
       - 'tools/prepare_rk3588_compare.sh'
@@ -47,6 +48,8 @@ jobs:
           bash -n tools/bench_android.sh
           python3 -m py_compile tools/prepare_rk3588_compare_input.py tools/summarize_rk3588_compare.py tools/test_rk3588_compare.py
           python3 tools/test_rk3588_compare.py
+          python3 -m pip install --user 'numpy>=1.26,<3'
+          python3 tools/test_rk3588_gpu_tile.py
           bash tools/test_bench_android_smoke.sh
       - name: Install Android NDK and runtime toolchain
         env:
