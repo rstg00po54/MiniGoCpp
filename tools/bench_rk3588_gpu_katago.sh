@@ -148,8 +148,8 @@ fi
 # but they do NOT implement the pure-NN "benchmarknn" subcommand. Check the
 # command before running so a zero-exit unknown-command message is never parsed
 # as a successful GPU run.
-benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\r')" || true
-if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
+benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -help" 2>&1 | tr -d '\r')" || true
+if ! grep -Fq -- '-iterations' <<< "$benchmark_help" || ! grep -Fq -- '-batch-size' <<< "$benchmark_help"; then
     echo "KATAGO_NATIVE_OLD_BINARY benchmarknn unsupported: $REMOTE_BIN"
     if [ "${KATAGO_AUTOBUILD:-1}" != 1 ]; then
         echo "ERROR: Existing KataGo OpenCL executable lacks benchmarknn; KATAGO_AUTOBUILD=0 disables isolated official rebuild" >&2
@@ -184,15 +184,15 @@ if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-
     grep -qi 'Using OpenCL backend' <<< "$version" || {
         echo "ERROR: The newly built KataGo is not an OpenCL backend" >&2; exit 1;
     }
-    benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\r')" || true
-    if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
+    benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -help" 2>&1 | tr -d '\r')" || true
+    if ! grep -Fq -- '-iterations' <<< "$benchmark_help" || ! grep -Fq -- '-batch-size' <<< "$benchmark_help"; then
         echo "$benchmark_help" >&2
         echo "ERROR: Official KataGo build does not support expected benchmarknn CLI" >&2
         exit 1
     fi
     echo "KATAGO_NATIVE_UPGRADE_READY executable=$REMOTE_BIN"
 fi
-# benchmarknn --json emits one result object; host report validates batch=1,
+# benchmarknn -json emits one result object; host report validates batch=1,
 # 1 NN server thread, board=19 and backend OpenCL before accepting a number.
 echo "KATAGO_NATIVE_START backend=opencl boardsize=19 batch=1 threads=1 runs=$RUNS warmup=$WARMUP"
-"${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" 2>&1 | tr -d '\r'
+"${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG -boardsize 19 -batch-size 1 -iterations $RUNS -warmup $WARMUP -json" 2>&1 | tr -d '\r'
