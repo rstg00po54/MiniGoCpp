@@ -2,6 +2,7 @@
 // NNAPI provider assignment is verified from ORT profile: NNAPI does not imply NPU.
 #include <android/NeuralNetworks.h>
 #include "onnxruntime_cxx_api.h"
+#include "rk3588_compare_input.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -58,7 +59,7 @@ static int profileCount(const std::string& profile, const std::string& name) {
     return count;
 }
 
-static int run(const std::string& model, const std::string& mode, int warmup, int runs, int threads) {
+static int run(const std::string& model, const std::string& mode, int warmup, int runs, int threads, const std::string& comparePath) {
     std::printf("ONNX Runtime device benchmark: mode=%s model=%s\n", mode.c_str(), model.c_str());
     std::printf("Input: synthetic 19x19 tensors; batch=1; NN-only; NOT KataGo MCTS visits/s.\n");
     listDevices();
@@ -102,6 +103,12 @@ static int run(const std::string& model, const std::string& mode, int warmup, in
     std::vector<float> spatial(22 * 19 * 19, 0.0f);
     std::vector<float> globals(19, 0.0f);
     std::vector<float> mask(19 * 19, 1.0f);
+    std::unique_ptr<KataGoComparisonInput> comparison;
+    if(!comparePath.empty()) {
+        comparison.reset(new KataGoComparisonInput(comparePath));
+        spatial=comparison->spatial;globals=comparison->global;mask=comparison->mask;
+        std::printf("COMPARE_INPUT backend=%s source=%s\\n",mode.c_str(),comparePath.c_str());
+    }
     auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::vector<Ort::Value> values;
     for (const char* name : inputNames) {
@@ -113,11 +120,13 @@ static int run(const std::string& model, const std::string& mode, int warmup, in
         else if (x == "InputMask")
             values.emplace_back(Ort::Value::CreateTensor<float>(memory, mask.data(), mask.size(), shapeMask.data(), 4));
     }
-    auto infer = [&]() {
+    auto infer = [&](bool verify) {
         auto outputs = session.Run(Ort::RunOptions{nullptr}, inputNames.data(), values.data(), values.size(),
                                    outputNames.data(), outputNames.size());
         if (outputs.size() != 5) throw std::runtime_error("Unexpected output count");
-        for (auto& output : outputs) {
+        bool accurate=true;
+        for (size_t k=0;k<outputs.size();k++) {
+            auto& output=outputs[k];
             if (!output.IsTensor()) throw std::runtime_error("Unexpected non-tensor output");
             auto info = output.GetTensorTypeAndShapeInfo();
             auto len = info.GetElementCount();
@@ -127,15 +136,24 @@ static int run(const std::string& model, const std::string& mode, int warmup, in
             for (size_t i = 0; i < len; i++) {
                 if (!std::isfinite(ptr[i])) throw std::runtime_error("Nonfinite model output");
             }
+            if(comparison && verify) {
+                std::string name(outputNames[k]);
+                size_t index=0;
+                for(;index<5;index++)if(name==KataGoComparisonInput::head(index))break;
+                if(index==5)throw std::runtime_error("Unrecognized ONNX reference output name: "+name);
+                accurate=comparison->check(index,ptr,len,"cpu")&&accurate;
+            }
         }
+        if(!accurate)throw std::runtime_error("ONNX CPU comparison validation failed");
     };
     std::printf("Session initialization: %.2f ms\n", initMs);
-    for (int i = 0; i < warmup; i++) infer();
+    for (int i = 0; i < warmup; i++) infer(false);
+    if(comparison)infer(true);
     std::vector<double> latencies;
     latencies.reserve(runs);
     for (int i = 0; i < runs; i++) {
         auto t = Clock::now();
-        infer();
+        infer(false);
         latencies.push_back(std::chrono::duration<double, std::milli>(Clock::now() - t).count());
     }
     double mean = std::accumulate(latencies.begin(), latencies.end(), 0.0) / latencies.size();
@@ -166,7 +184,8 @@ int main(int argc, char** argv) {
         int threads = argc > 5 ? std::stoi(argv[5]) : 4;
         if ((mode != "cpu" && mode != "nnapi") || warmup < 0 || runs < 1 || runs > 100000 || threads < 1 || threads > 32)
             throw std::runtime_error("Invalid mode or counts");
-        return run(argv[1], mode, warmup, runs, threads);
+        const std::string comparisonPath=argc>6?argv[6]:"";
+        return run(argv[1], mode, warmup, runs, threads, comparisonPath);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: %s\n", e.what());
         return 1;
