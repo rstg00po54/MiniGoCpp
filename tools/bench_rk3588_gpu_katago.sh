@@ -75,6 +75,12 @@ if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
         if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
     done
 fi
+if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ] && [ "${KATAGO_AUTOBUILD:-1}" = 1 ]; then
+    echo "KATAGO_NATIVE_MISSING no existing OpenCL binary, building official benchmarknn"
+    bash "$ROOT/tools/build_rk3588_katago_benchmarknn.sh"
+    CACHE="${KATAGO_NATIVE_CACHE:-$HOME/.cache/minigocpp/katago_native_v1.18.0}"
+    BIN="$CACHE/build/katago"
+fi
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
     echo "ERROR: KataGo Android native executable not found." >&2
     echo "Set KATAGO_BIN=/path/to/Android/arm64/katago or KATAGO_REMOTE_BIN=/data/local/tmp/.../katago." >&2
@@ -176,4 +182,4 @@ fi
 # benchmarknn --json emits one result object; host report validates batch=1,
 # 1 NN server thread, board=19 and backend OpenCL before accepting a number.
 echo "KATAGO_NATIVE_START backend=opencl boardsize=19 batch=1 threads=1 runs=$RUNS warmup=$WARMUP"
-"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" | tr -d '\r'
+"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" 2>&1 | tr -d '\r'
