@@ -161,26 +161,22 @@ if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-
     BIN="$CACHE/build/katago"
     [ -s "$BIN" ] || { echo "ERROR: Official KataGo benchmarknn build binary missing: $BIN" >&2; exit 1; }
     REMOTE_BIN="$REMOTE/katago_official_nn"
-    # The OpenCL link input may export versioned OPENCL_1.0 symbols with
-    # DT_SONAME=libGLES_mali.so. Stage the exact same file as runtime dependency,
-    # not the unrelated /vendor/lib64/egl/libGLES_mali.so driver.
-    LINK_FILE_MANIFEST="$CACHE/opencl_link_file.txt"
-    SONAME_MANIFEST="$CACHE/opencl_link_soname.txt"
-    [ -s "$LINK_FILE_MANIFEST" ] && [ -s "$SONAME_MANIFEST" ] || {
-        echo "ERROR: Official KataGo OpenCL link manifest is missing" >&2; exit 1;
+    # Build-time OpenCL import stub is LINK ONLY and MUST NOT be installed.
+    # Android already ships its real libOpenCL.so (/vendor/lib64/libOpenCL.so).
+    # This is identical to the proven GoEngine-java openclportable ABI:
+    # DT_NEEDED=libOpenCL.so, no vendor OPENCL_1.0 symbol version requirement.
+    manifest="$CACHE/opencl_link_mode.txt"
+    [ -s "$manifest" ] && [ "$(cat "$manifest")" = "LINK_ONLY" ] || {
+        echo "ERROR: Portable OpenCL link-only manifest missing; refusing to deploy vendor-specific library" >&2; exit 1;
     }
-    LINK_FILE="$(cat "$LINK_FILE_MANIFEST")"
-    LINK_SONAME="$(cat "$SONAME_MANIFEST")"
-    case "$LINK_SONAME" in
-        libOpenCL.so|libGLES_mali.so) ;;
-        *) echo "ERROR: Invalid OpenCL link SONAME $LINK_SONAME" >&2; exit 1 ;;
-    esac
-    [ -s "$LINK_FILE" ] || { echo "ERROR: Selected OpenCL runtime vanished: $LINK_FILE" >&2; exit 1; }
-    echo "KATAGO_OPENCL_STAGING exact_linked_file=$LINK_FILE runtime=$REMOTE/$LINK_SONAME"
-    "${ADB_ARGS[@]}" push "$LINK_FILE" "$REMOTE/$LINK_SONAME" >/dev/null
+    if ! "${ADB_ARGS[@]}" shell "test -r /vendor/lib64/libOpenCL.so"; then
+        echo "ERROR: Device vendor OpenCL runtime /vendor/lib64/libOpenCL.so is missing" >&2
+        exit 1
+    fi
+    echo "KATAGO_OPENCL_RUNTIME real_device=/vendor/lib64/libOpenCL.so linked_soname=libOpenCL.so stub_deployed=NO"
     "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
     "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN"
-    LIBS="$REMOTE:/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
+    LIBS="/vendor/lib64:$REMOTE:/vendor/lib64/egl:/system/vendor/lib64:/system/lib64"
     version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
         echo "$version" >&2; echo "ERROR: Official KataGo v1.18 OpenCL binary cannot execute on RK3588" >&2; exit 1;
     }
