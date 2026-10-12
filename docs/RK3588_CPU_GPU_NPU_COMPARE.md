@@ -1,5 +1,49 @@
 # RK3588S: official KataGo OpenCL GPU vs CPU vs NPU
 
+## Portable OpenCL linking — device-independent (2026-10-12)
+
+The upstream official KataGo v1.18.0 source was successfully cloned, but
+the initial Android cross-build failed before CMake because the helper
+incorrectly demanded unversioned clGetPlatformIDs from a single RK3588
+`/vendor/lib64/egl/libGLES_mali.so` file. This was a build-script design
+error, not a GPU benchmark failure.
+
+**Correct approach:** reuse the ABI design of the successfully tested
+GoEngine-java `openclportable` build (which ran on both RK3588 and vivo),
+but remove even the compile-time dependency on a vendor OpenCL library:
+
+1. Use Khronos `CL/cl.h` headers and an Android ARM64 **link-only import stub**
+   built by `tools/create_opencl_android_link_stub.py`.
+2. Link the official KataGo executable with a stable ELF
+   `DT_NEEDED=libOpenCL.so`, without any version-pinned `OPENCL_1.0`
+   requirements or direct `libGLES_mali.so` dependency.
+3. **Never deploy the stub**. On RK3588 the actual implementation is
+   `/vendor/lib64/libOpenCL.so`; Android loads that true vendor OpenCL
+   runtime when executing KataGo. This scheme can also work on other
+   Android devices that genuinely provide an OpenCL runtime.
+4. CI now cross-compiles a minimal ARM64 OpenCL-linked executable and
+   verifies `DT_NEEDED=libOpenCL.so` and no vendor symbol version.
+   This checks linking; actual GPU inference still needs an on-device run.
+
+The cache remains at
+`~/.cache/minigocpp/katago_native_v1.18.0/`, and the already-cloned
+`source/` directory is reused. No vendor Mali binary is copied into
+GitHub or deployed as a substitute for the device's OpenCL runtime.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+GPU_RUNS=30 GPU_WARMUP=5 bash tools/bench_rk3588_gpu_katago.sh
+```
+
+Once this native GPU result validates, repeat the one-command CPU/GPU/NPU
+run if desired. As before, `benchmarknn` and the reference-verified
+CPU/NPU tests are different exact input workloads, so the report labels
+GPU/CPU throughput ratios indicative only.
+
+---
+
+
 ## Fix for the October 12 native GPU benchmarknn failure
 
 The third RK3588 19×19 NN-only CPU/NPU run yielded CPU **43.28 NN/s**
