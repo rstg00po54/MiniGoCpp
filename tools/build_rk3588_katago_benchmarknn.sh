@@ -20,8 +20,10 @@ command -v ninja >/dev/null || { echo "ERROR: ninja missing" >&2; exit 1; }
 command -v readelf >/dev/null || { echo "ERROR: binutils/readelf missing" >&2; exit 1; }
 case "$JOBS" in ''|*[!0-9]*) echo "ERROR: KATAGO_BUILD_JOBS must be a positive integer" >&2; exit 2 ;; esac
 [ "$JOBS" -gt 0 ] || exit 2
-if [ -s "$OUT" ] && [ "${KATAGO_FORCE_REBUILD:-0}" != 1 ]; then
-    echo "KATAGO_OFFICIAL_BUILD_REUSED binary=$OUT version=$TAG"
+if [ -s "$OUT" ] && [ "${KATAGO_FORCE_REBUILD:-0}" != 1 ] && \
+   readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' && \
+   ! readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
+    echo "KATAGO_OFFICIAL_BUILD_REUSED binary=$OUT version=$TAG linked=portable-libOpenCL.so"
     exit 0
 fi
 NDK="${NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
@@ -60,79 +62,31 @@ fi
 }
 mkdir -p "$CACHE/opencl_headers/CL"
 cp -a "$HEADERS/CL/." "$CACHE/opencl_headers/CL/"
-# Link only with ARM64 OpenCL libraries defining the actual cl* entrypoints.
-# RK3588 vendor libOpenCL.so may be a versioned OPENCL_1.0 implementation with
-# SONAME libGLES_mali.so. Its symbols ARE valid; the earlier strict unversioned
-# filter incorrectly rejected it and chose /vendor/lib64/egl/libGLES_mali.so.
-has_gpu_api() {
-    local file="$1"
-    [ -s "$file" ] || return 1
-    readelf -W -h "$file" | grep -Eq 'Machine:[[:space:]]*AArch64' || return 1
-    readelf -W --dyn-syms "$file" | awk '
-        $7 != "UND" && $8 ~ /^clGetPlatformIDs(@.*)?$/ {p=1}
-        $7 != "UND" && $8 ~ /^clCreateContext(@.*)?$/ {c=1}
-        END {exit !(p&&c)}' || return 1
+# Portable OpenCL: cross-compile a LINK-ONLY import .so for Android ARM64.
+# The stub has the standard SONAME libOpenCL.so with unversioned core OpenCL
+# symbols; it must NEVER be installed on Android. At runtime the real vendor
+# /vendor/lib64/libOpenCL.so is loaded, as with the proven openclportable build.
+LINK_LIB="$CACHE/linkonly/libOpenCL.so"
+CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+[ -x "$CC" ] || { echo "ERROR: Android NDK Clang not found: $CC" >&2; exit 1; }
+if [ ! -s "$LINK_LIB" ] || [ "$ROOT/tools/create_opencl_android_link_stub.py" -nt "$LINK_LIB" ]; then
+    python3 "$ROOT/tools/create_opencl_android_link_stub.py" \
+        --header "$CACHE/opencl_headers/CL/cl.h" --cc "$CC" --out "$LINK_LIB"
+fi
+readelf -W -h "$LINK_LIB" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
+    echo "ERROR: OpenCL link-only library is not Android ARM64" >&2; exit 1;
 }
-describe_gpu_api() {
-    local file="$1"
-    echo "KATAGO_OPENCL_PROBE file=$file"
-    readelf -W -h "$file" | grep -E 'Machine:|Class:' || true
-    readelf -W -d "$file" | grep -E '\\(SONAME\\)' || true
-    readelf -W --dyn-syms "$file" | grep -E 'cl(GetPlatformIDs|CreateContext)(@|[[:space:]]|$)' | head -8 || true
-    readelf -W -V "$file" | grep -E 'Name: OPENCL_[0-9]' | head -5 || true
+readelf -W -d "$LINK_LIB" | grep -Fq '[libOpenCL.so]' || {
+    echo "ERROR: Link-only OpenCL import SONAME is not libOpenCL.so" >&2; exit 1;
 }
-LINK_LIB="${KATAGO_OPENCL_ARM64_LIB:-}"
-if [ -n "$LINK_LIB" ]; then
-    if ! has_gpu_api "$LINK_LIB"; then
-        describe_gpu_api "$LINK_LIB"
-        echo "ERROR: Explicit KATAGO_OPENCL_ARM64_LIB is not an ARM64 OpenCL library with both required symbols" >&2
-        exit 1
-    fi
-fi
-if [ -z "$LINK_LIB" ]; then
-    for path in "$HOME/.cache/goengine_katago/opencl_arm64/libOpenCL.so" \
-                "$HOME/.cache/goengine_katago/opencl_arm64_portable/libOpenCL.so" \
-                "$HOME/.cache/goengine_katago/opencl_arm64_portable/libGLES_mali.so" \
-                "$CACHE/libOpenCL.so" "$CACHE/libGLES_mali.so"; do
-        if has_gpu_api "$path"; then LINK_LIB="$path"; break; fi
-    done
-fi
-if [ -z "$LINK_LIB" ]; then
-    # Probe every vendor path first, without assuming EGL Mali exports OpenCL.
-    # The first vendor libOpenCL.so was already proven usable by GoEngine-java's
-    # existing versioned OpenCL benchmark (it stages this as libGLES_mali.so).
-    for remote in /vendor/lib64/libOpenCL.so /vendor/lib64/libGLES_mali.so \
-                  /vendor/lib64/egl/libGLES_mali.so /system/vendor/lib64/libOpenCL.so; do
-        local_file="$CACHE/vendor_$(echo "$remote" | tr '/' '_')"
-        if [ ! -s "$local_file" ]; then
-            echo "KATAGO_OPENCL_PULL path=$remote"
-            "$ADB" -s "$ADB_SERIAL" pull "$remote" "$local_file" >/dev/null 2>&1 || { rm -f "$local_file"; continue; }
-        fi
-        describe_gpu_api "$local_file"
-        if has_gpu_api "$local_file"; then LINK_LIB="$local_file"; break; fi
-    done
-fi
-if [ -z "$LINK_LIB" ]; then
-    echo "ERROR: No RK3588 ARM64 OpenCL library exports both clGetPlatformIDs and clCreateContext." >&2
-    echo "Inspect KATAGO_OPENCL_PROBE diagnostics; do not fall back to a non-OpenCL EGL library." >&2
+if readelf -W -V "$LINK_LIB" | grep -Eq 'Name: OPENCL_[0-9]'; then
+    echo "ERROR: OpenCL link-only import library must have no vendor symbol-version requirements" >&2
     exit 1
 fi
-LINK_LIB="$(realpath "$LINK_LIB")"
-SONAME="$(readelf -W -d "$LINK_LIB" | sed -nE 's/.*\\(SONAME\\).*\\[([^]]+)\\].*/\\1/p' | head -1)"
-case "$SONAME" in
-    libOpenCL.so|libGLES_mali.so) ;;
-    *) echo "ERROR: Unexpected OpenCL SONAME '${SONAME:-empty}' in $LINK_LIB" >&2; exit 1 ;;
-esac
-if readelf -W -V "$LINK_LIB" | grep -Eq 'Name: OPENCL_[0-9]'; then
-    echo "KATAGO_OPENCL_LINK_VERSION=OPENCL_1.0_OR_NEWER"
-else
-    echo "KATAGO_OPENCL_LINK_VERSION=UNVERSIONED"
-fi
-echo "KATAGO_OPENCL_SELECTED file=$LINK_LIB soname=$SONAME"
-# Kept as a manifest so the Android GPU launcher stages the SAME vendor
-# library under its NEEDED SONAME; a different EGL Mali build may be ABI-incompatible.
-printf '%s\\n' "$LINK_LIB" > "$CACHE/opencl_link_file.txt"
-printf '%s\\n' "$SONAME" > "$CACHE/opencl_link_soname.txt"
+echo "KATAGO_OPENCL_SELECTED file=$LINK_LIB mode=PORTABLE_LINK_ONLY soname=libOpenCL.so deploy=NO"
+printf '%s\n' "$LINK_LIB" > "$CACHE/opencl_link_file.txt"
+printf '%s\n' "libOpenCL.so" > "$CACHE/opencl_link_soname.txt"
+printf '%s\n' "LINK_ONLY" > "$CACHE/opencl_link_mode.txt"
 echo "KATAGO_OFFICIAL_CONFIG tag=$TAG ndk=$NDK opencl=$LINK_LIB headers=$HEADERS jobs=$JOBS"
 cmake -Wno-deprecated -S "$SOURCE/cpp" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
@@ -147,4 +101,11 @@ cmake --build "$BUILD" --parallel "$JOBS"
 readelf -h "$OUT" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
     echo "ERROR: KataGo binary is not Android ARM64" >&2; exit 1;
 }
-echo "KATAGO_OFFICIAL_BUILD_READY binary=$OUT tag=$TAG"
+readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' || {
+    echo "ERROR: KataGo executable does not have portable DT_NEEDED=libOpenCL.so" >&2; exit 1;
+}
+if readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
+    echo "ERROR: KataGo executable still depends on vendor OPENCL_ symbol version" >&2
+    exit 1
+fi
+echo "KATAGO_OFFICIAL_BUILD_READY binary=$OUT tag=$TAG OpenCL_SONAME=libOpenCL.so vendor_lock=NO"
