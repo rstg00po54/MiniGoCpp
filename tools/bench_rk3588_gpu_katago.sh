@@ -33,26 +33,7 @@ check_remote_path() {
 for path in "$REMOTE" "$REMOTE_BIN" "$REMOTE_MODEL" "$REMOTE_CFG"; do
     if [ -n "$path" ]; then check_remote_path "$path"; fi
 done
-# Look only at explicit conventional host paths; never infer .so is an executable.
-if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
-    for candidate in "$ROOT/../GoEngine-java/build/katago_android_arm64_openclportable/libkatago_exec_opencl.so" \
-                     "$ROOT/../GoEngine-java/build/katago_android_arm64_opencl/libkatago_exec_opencl.so" \
-                     "$ROOT/../GoEngine-java/katago" "$ROOT/../GoEngine-java/build/katago" \
-                     "$ROOT/../KataGo/cpp/katago" "$ROOT/../KataGo/build/katago" \
-                     "$ROOT/../katago/katago"; do
-        if [ -f "$candidate" ]; then BIN="$candidate"; break; fi
-    done
-fi
-if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
-    for candidate in "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin" \
-                     "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin.gz" \
-                     "$ROOT/../GoEngine-java/models/10b.bin" "$ROOT/../GoEngine-java/models/10b.bin.gz" \
-                     "$ROOT/../GoEngine-java/10b.bin" "$ROOT/../GoEngine-java/10b.bin.gz" \
-                     "$ROOT/../KataGo/10b.bin" "$ROOT/../KataGo/10b.bin.gz" "$ROOT/../KataGo/models/10b.bin.gz"; do
-        if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
-    done
-fi
-# Reuse a previously staged Android command-line KataGo when available.
+# Prefer the already working GoEngine-java RK3588 GPU benchmark installation.
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
     for candidate in "/data/local/tmp/katago_bench/katago_gpu" \
                      "/data/local/tmp/katago_bench/libkatago_exec_opencl.so" \
@@ -73,6 +54,25 @@ if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
         if "${ADB_ARGS[@]}" shell "test -s $candidate" >/dev/null 2>&1; then
             REMOTE_MODEL="$candidate"; break
         fi
+    done
+fi
+# Otherwise reuse the sibling project's Android-built KataGo executable and model.
+if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
+    for candidate in "$ROOT/../GoEngine-java/build/katago_android_arm64_openclportable/libkatago_exec_opencl.so" \
+                     "$ROOT/../GoEngine-java/build/katago_android_arm64_opencl/libkatago_exec_opencl.so" \
+                     "$ROOT/../GoEngine-java/katago" "$ROOT/../GoEngine-java/build/katago" \
+                     "$ROOT/../KataGo/cpp/katago" "$ROOT/../KataGo/build/katago" \
+                     "$ROOT/../katago/katago"; do
+        if [ -f "$candidate" ]; then BIN="$candidate"; break; fi
+    done
+fi
+if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
+    for candidate in "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin" \
+                     "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin.gz" \
+                     "$ROOT/../GoEngine-java/models/10b.bin" "$ROOT/../GoEngine-java/models/10b.bin.gz" \
+                     "$ROOT/../GoEngine-java/10b.bin" "$ROOT/../GoEngine-java/10b.bin.gz" \
+                     "$ROOT/../KataGo/10b.bin" "$ROOT/../KataGo/10b.bin.gz" "$ROOT/../KataGo/models/10b.bin.gz"; do
+        if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
     done
 fi
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
