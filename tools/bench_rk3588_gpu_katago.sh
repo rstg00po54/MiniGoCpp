@@ -125,7 +125,7 @@ fi
 CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 [ ! -s "$CPP_LIB" ] || "${ADB_ARGS[@]}" push "$CPP_LIB" "$REMOTE/libc++_shared.so" >/dev/null
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN" >/dev/null || true
-LIBS="$REMOTE:$(dirname "$REMOTE_BIN"):/vendor/lib64:/system/vendor/lib64:/system/lib64"
+LIBS="$REMOTE:$(dirname "$REMOTE_BIN"):/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
 echo "KATAGO_NATIVE_PRECHECK serial=$ADB_SERIAL path=$REMOTE_BIN model=$REMOTE_MODEL"
 # The KataGo 'version' subcommand truthfully identifies compile-time backend.
 version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
@@ -137,6 +137,41 @@ echo "$version"
 if ! grep -qi 'Using OpenCL backend' <<< "$version"; then
     echo "ERROR: Not a KataGo OpenCL build; refusing to label CPU/CUDA/other backend as RK GPU." >&2
     exit 1
+fi
+# KataGo versions v1.14/v1.15 can run the native OpenCL MCTS "benchmark",
+# but they do NOT implement the pure-NN "benchmarknn" subcommand. Check the
+# command before running so a zero-exit unknown-command message is never parsed
+# as a successful GPU run.
+benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
+if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
+    echo "KATAGO_NATIVE_OLD_BINARY benchmarknn unsupported: $REMOTE_BIN"
+    if [ "${KATAGO_AUTOBUILD:-1}" != 1 ]; then
+        echo "ERROR: Existing KataGo OpenCL executable lacks benchmarknn; KATAGO_AUTOBUILD=0 disables isolated official rebuild" >&2
+        exit 1
+    fi
+    echo "KATAGO_NATIVE_UPGRADE building official KataGo v1.18.0 OpenCL command in independent MiniGoCpp cache"
+    bash "$ROOT/tools/build_rk3588_katago_benchmarknn.sh"
+    CACHE="${KATAGO_NATIVE_CACHE:-$HOME/.cache/minigocpp/katago_native_v1.18.0}"
+    BIN="$CACHE/build/katago"
+    [ -s "$BIN" ] || { echo "ERROR: Official KataGo benchmarknn build binary missing: $BIN" >&2; exit 1; }
+    REMOTE_BIN="$REMOTE/katago_official_nn"
+    "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
+    "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN"
+    LIBS="$REMOTE:/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
+    version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\\r')" || {
+        echo "$version" >&2; echo "ERROR: Official KataGo v1.18 OpenCL binary cannot execute on RK3588" >&2; exit 1;
+    }
+    echo "$version"
+    grep -qi 'Using OpenCL backend' <<< "$version" || {
+        echo "ERROR: The newly built KataGo is not an OpenCL backend" >&2; exit 1;
+    }
+    benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
+    if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
+        echo "$benchmark_help" >&2
+        echo "ERROR: Official KataGo build does not support expected benchmarknn CLI" >&2
+        exit 1
+    fi
+    echo "KATAGO_NATIVE_UPGRADE_READY executable=$REMOTE_BIN"
 fi
 # benchmarknn --json emits one result object; host report validates batch=1,
 # 1 NN server thread, board=19 and backend OpenCL before accepting a number.
