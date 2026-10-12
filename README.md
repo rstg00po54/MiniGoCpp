@@ -193,7 +193,7 @@ adb devices -l
 bash tools/bench_android.sh
 ```
 
-**vivo** 默认测试 ONNX Runtime CPU、NNAPI 和现有 KataGo OpenCL GPU 测试；**RK3588 Android** 还会包含 RKNN NPU。可单独选择：
+**vivo** 的 `bench_android.sh vivo` 默认执行 Neuron 接口探测，并非完整网络 NPU 测速；需要手机 CPU/NNAPI/GPU 测试时显式传入模式。**RK3588 Android** 支持 RKNN NPU。可单独选择：
 
 ```bash
 bash tools/bench_android.sh cpu nnapi
@@ -214,12 +214,33 @@ bash tools/bench_android.sh vivo cpu nnapi  # 手机 CPU/NNAPI 推理，NNAPI �
 bash tools/bench_android.sh rk          # RK3588：自动运行 RKNN NPU 测速
 ```
 
-通过制造商和 SoC 属性识别连接的设备，不依赖 ADB 列表顺序。如有相同机型的多个连接，可使用 `ADB_SERIAL=设备序列号` 强制选择。**vivo NPU 模式目前是能力检查，不是已经实现的联发科 Neuron 推理测试**；详见 [Android 测试说明](docs/KATAGO_ANDROID_BENCH.md)。
+通过制造商和 SoC 属性识别连接的设备，不依赖 ADB 列表顺序。如有相同机型的多个连接，可使用 `ADB_SERIAL=设备序列号` 强制选择。**`bench_android.sh vivo` 的 `npu` 模式仍只是 Neuron 能力检查**；但项目另有可运行完整 KataGo 10b 的 `tools/bench_mediatek_katago_full.sh mtk-mdla`，已经在 vivo X300 Pro 上实测并通过五个输出头的数值检查。详见 [Android 测试说明](docs/KATAGO_ANDROID_BENCH.md)。
 
-通过 `bash tools/bench_mediatek_neuron.sh` 可单独执行原生 Neuron Adapter API 检测：编译 Android ARM64 C++，ADB 推送，尝试 Neuron 编译、推理并验证结果。这个阶段还不代表 KataGo 10b 已在 vivo NPU 上运行。
+通过 `bash tools/bench_mediatek_neuron.sh` 可单独执行原生 Neuron Adapter API 检测：编译 Android ARM64 C++，ADB 推送，尝试 Neuron 编译、推理并验证结果。该接口冒烟测试本身不代表 KataGo 10b 推理；真正的手机全网络 MDLA 测试使用 `tools/bench_mediatek_katago_full.sh mtk-mdla`。
 
 
 ## RK3588 CPU/GPU/NPU：官方 KataGo GPU 推理对比
+
+### 最新实测速览（2026-10-12）
+
+KataGo 10b、19×19、batch=1、NN-only：
+
+| 实测设备与后端 | 单次推理 | 吞吐量 | 状态 |
+| --- | ---: | ---: | --- |
+| RK3588S CPU（ONNX Runtime FP32，4线程） | 平均 23.335 ms | 42.85 NN/s | PASS（5/5 输出头） |
+| RK3588S GPU（官方 KataGo OpenCL FP16） | 中位 21.673 ms | 46.04 NN/s | PASS_NATIVE（不同输入） |
+| RK3588S NPU（RKNN Core 0） | 平均 9.062 ms | 110.35 NN/s | PASS（5/5 输出头） |
+| vivo X300 Pro NPU（MediaTek MDLA） | 平均 1.428 ms | 700.16 NN/s | PASS（5/5 输出头，2026-10-10） |
+
+RK3588 三项来自同一次 30 次正式测试；手机 NPU 来自单独的
+1000 次正式测试。手机 NPU 的吞吐量约为 RK3588 NPU 单核的
+**6.34 倍**，但手机和开发板使用不同输入/后端/测试次数；
+GPU 也采用 KataGo 原生 `benchmarknn`，与 CPU/NPU 的共享 ONNX 输入
+不同。这些倍数只能作为**参考**，不能当作严格同工作负载硬件加速比。
+
+完整结果、验证情况、复现命令及原始日志所在目录见
+[RK3588 与 vivo KataGo 性能实测记录](docs/RK3588_CPU_GPU_NPU_COMPARE.md)
+和 [vivo Neuron 全网络测速](docs/KATAGO_ANDROID_BENCH.md)。
 
 CPU 使用 ONNX Runtime，NPU 使用 RKNN（NHWC，5/5 输出验证），GPU 使用 **KataGo 官方 OpenCL `benchmarknn`**，不再使用自写的慢速 OpenCL 卷积程序。
 
