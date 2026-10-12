@@ -161,6 +161,23 @@ if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-
     BIN="$CACHE/build/katago"
     [ -s "$BIN" ] || { echo "ERROR: Official KataGo benchmarknn build binary missing: $BIN" >&2; exit 1; }
     REMOTE_BIN="$REMOTE/katago_official_nn"
+    # The OpenCL link input may export versioned OPENCL_1.0 symbols with
+    # DT_SONAME=libGLES_mali.so. Stage the exact same file as runtime dependency,
+    # not the unrelated /vendor/lib64/egl/libGLES_mali.so driver.
+    LINK_FILE_MANIFEST="$CACHE/opencl_link_file.txt"
+    SONAME_MANIFEST="$CACHE/opencl_link_soname.txt"
+    [ -s "$LINK_FILE_MANIFEST" ] && [ -s "$SONAME_MANIFEST" ] || {
+        echo "ERROR: Official KataGo OpenCL link manifest is missing" >&2; exit 1;
+    }
+    LINK_FILE="$(cat "$LINK_FILE_MANIFEST")"
+    LINK_SONAME="$(cat "$SONAME_MANIFEST")"
+    case "$LINK_SONAME" in
+        libOpenCL.so|libGLES_mali.so) ;;
+        *) echo "ERROR: Invalid OpenCL link SONAME $LINK_SONAME" >&2; exit 1 ;;
+    esac
+    [ -s "$LINK_FILE" ] || { echo "ERROR: Selected OpenCL runtime vanished: $LINK_FILE" >&2; exit 1; }
+    echo "KATAGO_OPENCL_STAGING exact_linked_file=$LINK_FILE runtime=$REMOTE/$LINK_SONAME"
+    "${ADB_ARGS[@]}" push "$LINK_FILE" "$REMOTE/$LINK_SONAME" >/dev/null
     "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
     "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN"
     LIBS="$REMOTE:/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
