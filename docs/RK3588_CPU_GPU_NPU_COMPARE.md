@@ -167,3 +167,54 @@ The wrapper still retains the `RKNN_INPUT_LAYOUT` override for controlled
 debugging (e.g. `RKNN_INPUT_LAYOUT=nchw`), and **will not report a PASS
 when its five output heads fail reference validation**.
 
+
+## RK3588 Mali-G610 GPU optimization: tiled implicit GEMM (2026-10-12)
+
+The existing **correct** direct convolution computes a single output element
+per OpenCL work item and repeatedly loads the same weights and activations.
+It was measured at 143.503 ms/NN eval (6.97 NN evals/s) after HWIO weight
+reordering. To reduce redundant global memory accesses, the **new default**
+GPU kernel uses an **8 x 16 x 32 blocked implicit matrix multiplication**:
+
+- 8 spatial points x 16 output channels computed cooperatively per workgroup;
+- 32 reduction elements at a time in local memory (`__local half`);
+- FP32 fused multiply-add accumulators and FP16 inputs/weights/outputs;
+- padding and 1x1/3x3/5x5 convolutions use the same code path;
+- original OHWI model weights are packed to HWIO once before GPU upload;
+- the original `direct` kernel remains available as an A/B control.
+
+This is an optimized **native OpenCL implementation of all 126 original network
+ops**, **not** the KataGo project's heavily tuned Winograd/GEMM OpenCL backend.
+The original five-head ONNX FP32 reference check is mandatory before timing.
+No speedup has been claimed until the tiled kernel passes on the actual Mali
+GPU.
+
+Single run (default tiled):
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+RUNS=10 WARMUP=2 bash tools/bench_rk3588_gpu_full.sh
+```
+
+**Better: compare original and tiled kernels on the same board automatically:**
+
+```bash
+GPU_RUNS=10 GPU_WARMUP=2 bash tools/bench_rk3588_gpu_ab.sh
+```
+
+The command reports `GPU_AB_PASS direct=... tiled=... speedup=...x`
+only if both kernels pass all five output validation checks. Full logs are
+saved under `results/gpu_ab_*/`. Both `GPU_CONV_KERNEL mode=direct` and
+`GPU_CONV_KERNEL mode=tiled` are printed explicitly. For manual runs choose
+`KATAGO_GPU_CONV=direct` or `KATAGO_GPU_CONV=tiled`.
+
+To remeasure all three CPU/GPU/NPU with the new default OpenCL kernel:
+
+```bash
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+If the tiled Mali kernel fails to compile or produces an incorrect output, the
+runner **fails without outputting a GPU speed number**. The `direct` fallback
+can be tested separately without affecting CPU/NPU code.
