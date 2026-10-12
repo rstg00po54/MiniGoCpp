@@ -56,7 +56,7 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
         std::unique_ptr<KataGoComparisonInput> comparison;
         if(!comparePath.empty()) {
             comparison.reset(new KataGoComparisonInput(comparePath));
-            std::printf("COMPARE_INPUT backend=rknn core=%s source=%s\\n",core.c_str(),comparePath.c_str());
+            std::printf("COMPARE_INPUT backend=rknn core=%s source=%s\n",core.c_str(),comparePath.c_str());
         }
         std::vector<std::vector<float>> buffers(io.n_input);
         std::vector<size_t> referenceIndices(io.n_output, 99);
@@ -64,7 +64,7 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
             for(uint32_t i=0;i<io.n_output;i++) {
                 rknn_tensor_attr attr={};attr.index=i;
                 check(rknn_query(ctx,RKNN_QUERY_OUTPUT_ATTR,&attr,sizeof(attr)),"RKNN_QUERY_OUTPUT_ATTR");
-                std::printf("output[%u] %s elements=%u\\n",i,attr.name,attr.n_elems);
+                std::printf("output[%u] %s elements=%u\n",i,attr.name,attr.n_elems);
                 for(size_t k=0;k<5;k++)if(std::string(attr.name)==KataGoComparisonInput::head(k))referenceIndices[i]=k;
                 if(referenceIndices[i]==99)
                     throw std::runtime_error("RKNN output name not mapped to KataGo reference: "+std::string(attr.name));
