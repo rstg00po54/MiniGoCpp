@@ -11,6 +11,8 @@ CACHE="${KATAGO_BENCH_CACHE:-$HOME/.cache/minigocpp/androidbench}"
 PACKET="${KATAGO_FULL_PACKET:-$CACHE/katago10b_full_neuron_v1.bin}"
 WARMUP="${GPU_WARMUP:-${WARMUP:-3}}"
 RUNS="${GPU_RUNS:-${RUNS:-20}}"
+GPU_CONV="${KATAGO_GPU_CONV:-tiled}"
+case "$GPU_CONV" in direct|tiled) ;; *) echo "ERROR: KATAGO_GPU_CONV must be direct or tiled" >&2; exit 2 ;; esac
 REMOTE="/data/local/tmp/minigocpp_gpu"
 if [ ! -s "$PACKET" ]; then
     bash "$ROOT/tools/prepare_rk3588_compare.sh"
@@ -36,5 +38,5 @@ fi
 CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 [ ! -s "$CPP_LIB" ] || "${ADB_ARGS[@]}" push "$CPP_LIB" "$REMOTE/libc++_shared.so" >/dev/null
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/gpu_katago_full_android"
-echo "GPU_FULL_START adb=$ADB_SERIAL warmup=$WARMUP runs=$RUNS model=KataGo10b/19x19"
-"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/vendor/lib64 ./gpu_katago_full_android katago_full.bin $WARMUP $RUNS" | tr -d '\r'
+echo "GPU_FULL_START adb=$ADB_SERIAL warmup=$WARMUP runs=$RUNS mode=$GPU_CONV model=KataGo10b/19x19"
+"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/vendor/lib64 KATAGO_GPU_CONV=$GPU_CONV ./gpu_katago_full_android katago_full.bin $WARMUP $RUNS" | tr -d '\r'
