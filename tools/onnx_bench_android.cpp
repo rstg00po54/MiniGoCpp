@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <numeric>
+#include <memory>
 #include <regex>
 #include <stdexcept>
 #include <string>
