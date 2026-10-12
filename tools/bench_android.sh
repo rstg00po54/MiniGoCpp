@@ -74,7 +74,8 @@ prepare_onnx() {
     local cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
     [ -x "$cc" ] || { echo "ERROR: NDK compiler missing; export NDK=/home/cc/Android/Sdk/ndk/27.2.12479018" >&2; exit 1; }
     local exe="$CACHE/onnx_bench_android"
-    if [ ! -x "$exe" ] || [ "$ROOT/tools/onnx_bench_android.cpp" -nt "$exe" ]; then
+    if [ ! -x "$exe" ] || [ "$ROOT/tools/onnx_bench_android.cpp" -nt "$exe" ] || \
+       [ "$ROOT/tools/rk3588_compare_input.h" -nt "$exe" ]; then
         echo "Compiling Android ARM64 ONNX Runtime benchmark..."
         "$cc" -std=c++17 -O2 -fPIE -pie -I"$CACHE/ort/headers" "$ROOT/tools/onnx_bench_android.cpp" \
             -L"$CACHE/ort" -lonnxruntime -lneuralnetworks -llog -ldl -Wl,-rpath,'$ORIGIN' -o "$exe"
@@ -86,13 +87,17 @@ prepare_onnx() {
     local cpp="$ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
     [ ! -s "$cpp" ] || adb_cmd push "$cpp" "$BASE/libc++_shared.so" >/dev/null
     adb_cmd shell "chmod 755 $BASE/onnx_bench_android"
+    if [ -n "${COMPARE_INPUT_FILE:-}" ]; then
+        [ -s "$COMPARE_INPUT_FILE" ] || { echo "ERROR: Missing shared input: $COMPARE_INPUT_FILE" >&2; exit 1; }
+        adb_cmd push "$COMPARE_INPUT_FILE" "$BASE/katago_compare_input.bin" >/dev/null
+    fi
     downloaded=1
 }
 nn_test() {
     prepare_onnx
     local m="$1"
     echo "===== $m: ONNX Runtime, NN only ====="
-    if ! adb_cmd shell "cd $BASE && LD_LIBRARY_PATH=$BASE ./onnx_bench_android model.onnx $m $WARMUP $RUNS $THREADS"; then
+    if ! adb_cmd shell "cd $BASE && LD_LIBRARY_PATH=$BASE ./onnx_bench_android model.onnx $m $WARMUP $RUNS $THREADS ${COMPARE_INPUT_FILE:+katago_compare_input.bin}"; then
         echo "FAILED $m: check above error (NNAPI may not support this graph/device)."
         return 1
     fi
