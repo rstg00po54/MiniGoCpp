@@ -1,4 +1,73 @@
-# RK3588S CPU / GPU / NPU: Complete KataGo 10b Benchmark
+# RK3588S: official KataGo OpenCL GPU vs CPU vs NPU
+
+## Current one-command benchmark (native GPU, 2026-10-12)
+
+The primary `tools/bench_rk3588_compare.sh` now runs **the official KataGo
+`benchmarknn` OpenCL backend** for GPU, never the custom experimental
+OpenCL convolution implementation. It keeps ONNX Runtime FP32 CPU and the
+numerically validated RKNN NPU (NHWC layout).
+
+**Prerequisite:** an Android ARM64 KataGo command-line executable compiled
+with OpenCL, implementing `katago version` and `katago benchmarknn`, plus
+the corresponding **original 10b native KataGo `.bin.gz` weights**.
+The script does not confuse `.onnx` or `.rknn` models with native KataGo weights.
+
+Specify host paths:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+KATAGO_BIN=/path/to/android/arm64/katago \
+KATAGO_MODEL=/path/to/g170-b10c128-s1141046784-d204142634.bin.gz \
+RUNS=30 WARMUP=5 THREADS=4 \
+bash tools/bench_rk3588_compare.sh
+```
+
+If KataGo is already installed in a directly executable Android shell location:
+
+```bash
+KATAGO_REMOTE_BIN=/data/local/tmp/katago/katago \
+KATAGO_REMOTE_MODEL=/data/local/tmp/katago/model.bin.gz \
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+The launcher checks known conventional local `katago` / `10b.bin.gz`
+paths when none are supplied. A missing or unsupported native executable
+is reported clearly as an **unavailable GPU benchmark**, never silently
+replaced by the old slow OpenCL implementation. Use `KATAGO_CONFIG` to
+provide a custom config, or `KATAGO_REMOTE_CONFIG` for an on-device config.
+Without either it creates a minimal single-GPU config with `nnMaxBatchSize=1`
+and a writable OpenCL tuning cache in `/data/local/tmp`.
+
+The GPU command uses `benchmarknn --boardsize 19 --batch-size 1 --iterations
+N --warmup N --json`. The parser requires version output explicitly saying
+`Using OpenCL backend`, revision ending in `-opencl`, one NN server thread,
+batch size 1, 19×19 board and valid positive wall-clock throughput. The result
+appears in `comparison.md`, `comparison.csv`, and `comparison.json`.
+
+**Important workload distinction:** Native KataGo `benchmarknn` is NN-only
+and does not include MCTS, but its test positions, preprocessing and backend
+execution path are not identical to the original single synthetic input
+validated against the ONNX CPU five-head reference. Therefore GPU is labeled
+`PASS_NATIVE`, its wall-clock NN evals/s is recorded, its per-thread median
+latency is kept separate from CPU/NPU mean latency, and any GPU/CPU ratio is
+marked **indicative**, not a fully like-for-like speedup. CPU/NPU results retain
+5/5 numerical reference checks. Confirm the native model identity in the JSON
+report before making model-to-model comparisons.
+
+The custom experimental GPU tester is preserved for debugging only:
+`bash tools/bench_rk3588_gpu_full.sh`, or
+`bash tools/bench_rk3588_gpu_ab.sh`. Its earlier 6.97 evals/s
+is **not** an official KataGo GPU benchmark.
+
+---
+
+## Historical experimental OpenCL baseline (superseded)
+
+The following sections document the earlier handwritten OpenCL benchmark and
+its accuracy checks. They are kept for diagnostic reference, but **do not
+describe the current default GPU path**.
+
 
 Run on the x86 Ubuntu host with **LubanCat-4IO Android 14 connected through ADB**.
 This is an **entire-network** KataGo 10b 19×19 neural-network forward benchmark,
