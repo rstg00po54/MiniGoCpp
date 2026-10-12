@@ -87,3 +87,44 @@ application nor the user's other Android project is modified.
 core 0 on the RK3588S; the three *separate* Context parallel throughput
 measurement is a different test and must not be plotted as single-inference
 NN evals/s without an aggregate wall-clock check.
+
+## First RK3588S physical-device result (2026-10-12, 30 measured, 5 warmup)
+
+The first original KataGo 10b benchmark on Android 14 LubanCat-4IO produced:
+
+| Device | Mean | P50 | P95 | NN evals/s | Reference check |
+| --- | ---: | ---: | ---: | ---: | --- |
+| CPU, ONNX Runtime FP32, 4 threads | 23.229 ms | 23.238 ms | 23.451 ms | 43.05 | PASS, 5/5 outputs |
+| GPU, Mali-G610 OpenCL FP16 (initial unoptimized kernel) | 404.555 ms | 405.209 ms | 408.646 ms | 2.47 | PASS, 5/5 outputs |
+| NPU, RKNN Core 0, 2.3.2 (driver 0.9.8) | **INVALID** | — | — | **DO NOT REPORT** | FAILED, five heads |
+
+The original published RKNN model gives wildly wrong outputs when fed the shared
+FP32 NCHW input. Its OutputPolicyPass max absolute error was **1407.962241** and
+OutputValue error **10552.061627**. The old standalone NPU timing of about 104
+model executions/s does **not** demonstrate valid KataGo inference and must
+not be used as a verified CPU/GPU/NPU comparison. Do not increase the tolerance
+or use timing from that model until this failure is explained.
+
+### Targeted input-layout diagnosis (same .rknn, same reference)
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+RUNS=5 WARMUP=1 CORE_MODES=0 RKNN_INPUT_LAYOUT=nhwc \
+  COMPARE_INPUT_FILE="$HOME/.cache/minigocpp/androidbench/katago10b_shared_input_v1.bin" \
+  bash tools/bench_rk3588_npu.sh
+```
+
+The native runner explicitly transposes the spatial input into NHWC, sets
+`RKNN_TENSOR_NHWC`, prints the first values and min/max of each output, and
+still compares all five outputs against the original ONNX reference. No
+successful numerical match, no valid NPU score. The default `nchw` path is
+unchanged. If both fail, investigate the RKNN converted model/ops rather than
+just changing runtime tensor layout.
+
+The initial GPU kernel used OHWI filter order with noncoalesced output-channel
+access. A subsequent experimental optimization transposes GPU filter data to
+HWIO for coalesced GPU memory access, and **needs a new RK3588 run with numeric
+verification** before its speed can be claimed. An OpenCL throughput result
+from this deliberately untuned implementation is not the Mali hardware peak.
+
