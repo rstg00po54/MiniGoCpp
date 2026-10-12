@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
         if ((core != "0" && core != "1" && core != "2" && core != "01" && core != "all" && core != "auto") || warmup < 0 || runs <= 0 || runs > 1000000) {
             throw std::runtime_error("core must be 0|1|2|01|all|auto; warmup >= 0; 0 < runs <= 1000000");
         }
-        const std::string inputLayout=argc>=7?argv[6]:"nchw";
+        const std::string inputLayout=argc>=7?argv[6]:"nhwc";
         return benchmark(argv[1], core, warmup, runs, argc>=6?argv[5]:"", inputLayout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: %s\n", e.what());
