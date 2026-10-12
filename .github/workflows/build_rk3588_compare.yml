@@ -47,14 +47,17 @@ jobs:
           python3 tools/test_rk3588_compare.py
           bash tools/test_bench_android_smoke.sh
       - name: Install Android NDK and runtime toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           sdkmanager --install 'ndk;27.2.12479018'
           mkdir -p build/rk3588_compare
-          BASE="https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v2.3.2/rknpu2/runtime/Android/librknn_api"
-          curl -fL --retry 3 -o build/rk3588_compare/rknn_api.h "$BASE/include/rknn_api.h"
-          curl -fL --retry 3 -o build/rk3588_compare/librknnrt.so "$BASE/arm64-v8a/librknnrt.so"
+          gh api -H 'Accept: application/vnd.github.raw+json' '/repos/airockchip/rknn-toolkit2/contents/rknpu2/runtime/Android/librknn_api/include/rknn_api.h?ref=v2.3.2' > build/rk3588_compare/rknn_api.h
+          gh api -H 'Accept: application/vnd.github.raw+json' '/repos/airockchip/rknn-toolkit2/contents/rknpu2/runtime/Android/librknn_api/arm64-v8a/librknnrt.so?ref=v2.3.2' > build/rk3588_compare/librknnrt.so
+          test -s build/rk3588_compare/rknn_api.h
+          test "$(wc -c < build/rk3588_compare/librknnrt.so)" -gt 1000000
           curl -fL --retry 3 -o build/rk3588_compare/onnxruntime.aar \
             https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.23.2/onnxruntime-android-1.23.2.aar
           unzip -p build/rk3588_compare/onnxruntime.aar jni/arm64-v8a/libonnxruntime.so > build/rk3588_compare/libonnxruntime.so
