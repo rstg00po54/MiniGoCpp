@@ -35,29 +35,40 @@ for path in "$REMOTE" "$REMOTE_BIN" "$REMOTE_MODEL" "$REMOTE_CFG"; do
 done
 # Look only at explicit conventional host paths; never infer .so is an executable.
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
-    for candidate in "$ROOT/../GoEngine-java/katago" "$ROOT/../GoEngine-java/build/katago" \
+    for candidate in "$ROOT/../GoEngine-java/build/katago_android_arm64_openclportable/libkatago_exec_opencl.so" \
+                     "$ROOT/../GoEngine-java/build/katago_android_arm64_opencl/libkatago_exec_opencl.so" \
+                     "$ROOT/../GoEngine-java/katago" "$ROOT/../GoEngine-java/build/katago" \
                      "$ROOT/../KataGo/cpp/katago" "$ROOT/../KataGo/build/katago" \
                      "$ROOT/../katago/katago"; do
         if [ -f "$candidate" ]; then BIN="$candidate"; break; fi
     done
 fi
 if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
-    for candidate in "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin.gz" \
-                     "$ROOT/../KataGo/10b.bin.gz" "$ROOT/../KataGo/models/10b.bin.gz" \
-                     "$ROOT/../GoEngine-java/10b.bin.gz"; do
+    for candidate in "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin" \
+                     "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin.gz" \
+                     "$ROOT/../GoEngine-java/models/10b.bin" "$ROOT/../GoEngine-java/models/10b.bin.gz" \
+                     "$ROOT/../GoEngine-java/10b.bin" "$ROOT/../GoEngine-java/10b.bin.gz" \
+                     "$ROOT/../KataGo/10b.bin" "$ROOT/../KataGo/10b.bin.gz" "$ROOT/../KataGo/models/10b.bin.gz"; do
         if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
     done
 fi
 # Reuse a previously staged Android command-line KataGo when available.
 if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
-    for candidate in "$REMOTE/katago" "/data/local/tmp/katago/katago" "/data/local/tmp/katago_native/katago"; do
+    for candidate in "/data/local/tmp/katago_bench/katago_gpu" \
+                     "/data/local/tmp/katago_bench/libkatago_exec_opencl.so" \
+                     "$REMOTE/katago" "/data/local/tmp/katago/katago" \
+                     "/data/local/tmp/katago_native/katago"; do
         if "${ADB_ARGS[@]}" shell "test -f $candidate" >/dev/null 2>&1; then
             REMOTE_BIN="$candidate"; break
         fi
     done
 fi
 if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
-    for candidate in "$REMOTE/model.bin.gz" "/data/local/tmp/katago/model.bin.gz" \
+    for candidate in "/data/local/tmp/katago_bench/10b.bin" \
+                     "/data/local/tmp/katago_bench/10b.bin.gz" \
+                     "$REMOTE/model.bin" "$REMOTE/model.bin.gz" \
+                     "/data/local/tmp/katago/10b.bin" "/data/local/tmp/katago/model.bin.gz" \
+                     "/data/local/tmp/katago_native/10b.bin" \
                      "/data/local/tmp/katago_native/model.bin.gz"; do
         if "${ADB_ARGS[@]}" shell "test -s $candidate" >/dev/null 2>&1; then
             REMOTE_MODEL="$candidate"; break
@@ -71,7 +82,7 @@ if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
     exit 1
 fi
 if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
-    echo "ERROR: Native KataGo 10b .bin.gz model missing (ONNX / RKNN cannot be loaded by native KataGo)." >&2
+    echo "ERROR: Native KataGo 10b .bin/.bin.gz model missing (ONNX / RKNN cannot be loaded by native KataGo)." >&2
     echo "Set KATAGO_MODEL=/path/to/g170-b10c128-...bin.gz or KATAGO_REMOTE_MODEL=/data/local/tmp/.../model.bin.gz." >&2
     exit 1
 fi
@@ -85,7 +96,7 @@ if [ -z "$REMOTE_BIN" ]; then
     "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
 fi
 if [ -z "$REMOTE_MODEL" ]; then
-    REMOTE_MODEL="$REMOTE/model.bin.gz"
+    REMOTE_MODEL="$REMOTE/model.bin"
     "${ADB_ARGS[@]}" push "$MODEL" "$REMOTE_MODEL" >/dev/null
 fi
 if [ -z "$REMOTE_CFG" ]; then
@@ -114,7 +125,7 @@ fi
 CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 [ ! -s "$CPP_LIB" ] || "${ADB_ARGS[@]}" push "$CPP_LIB" "$REMOTE/libc++_shared.so" >/dev/null
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN" >/dev/null || true
-LIBS="$REMOTE:/vendor/lib64:/system/vendor/lib64:/system/lib64"
+LIBS="$REMOTE:$(dirname "$REMOTE_BIN"):/vendor/lib64:/system/vendor/lib64:/system/lib64"
 echo "KATAGO_NATIVE_PRECHECK serial=$ADB_SERIAL path=$REMOTE_BIN model=$REMOTE_MODEL"
 # The KataGo 'version' subcommand truthfully identifies compile-time backend.
 version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
