@@ -1,5 +1,6 @@
 // RK3588 Android RKNN v2.3.x native NPU benchmark; not a KataGo MCTS benchmark.
 #include "rknn_api.h"
+#include "rk3588_compare_input.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 #include <numeric>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -26,7 +28,7 @@ static double percentile(const std::vector<double>& sorted, double p) {
     return sorted[a] + (sorted[b] - sorted[a]) * (index - a);
 }
 
-static int benchmark(const std::string& path, const std::string& core, int warmup, int runs) {
+static int benchmark(const std::string& path, const std::string& core, int warmup, int runs, const std::string& comparePath) {
     std::ifstream file(path, std::ios::binary);
     if (!file) throw std::runtime_error("Cannot open RKNN model: " + path);
     std::vector<char> model((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -51,7 +53,23 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
                                      " outputs=" + std::to_string(io.n_output) + " (expected 3/5)");
         }
 
+        std::unique_ptr<KataGoComparisonInput> comparison;
+        if(!comparePath.empty()) {
+            comparison.reset(new KataGoComparisonInput(comparePath));
+            std::printf("COMPARE_INPUT backend=rknn core=%s source=%s\\n",core.c_str(),comparePath.c_str());
+        }
         std::vector<std::vector<float>> buffers(io.n_input);
+        std::vector<size_t> referenceIndices(io.n_output, 99);
+        if(comparison) {
+            for(uint32_t i=0;i<io.n_output;i++) {
+                rknn_tensor_attr attr={};attr.index=i;
+                check(rknn_query(ctx,RKNN_QUERY_OUTPUT_ATTR,&attr,sizeof(attr)),"RKNN_QUERY_OUTPUT_ATTR");
+                std::printf("output[%u] %s elements=%u\\n",i,attr.name,attr.n_elems);
+                for(size_t k=0;k<5;k++)if(std::string(attr.name)==KataGoComparisonInput::head(k))referenceIndices[i]=k;
+                if(referenceIndices[i]==99)
+                    throw std::runtime_error("RKNN output name not mapped to KataGo reference: "+std::string(attr.name));
+            }
+        }
         std::vector<rknn_input> inputs(io.n_input);
         bool got_spatial = false, got_global = false, got_mask = false;
         for (uint32_t i = 0; i < io.n_input; i++) {
@@ -73,6 +91,8 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
             if (global) got_global = true;
             if (board_mask) got_mask = true;
             buffers[i].assign(expected, board_mask ? 1.0f : 0.0f);
+            if(comparison)buffers[i]=spatial?comparison->spatial:
+                                       (global?comparison->global:comparison->mask);
             // Unquantized host float arrays, NCHW as exported by KataGo.
             inputs[i] = {};
             inputs[i].index = i;
@@ -84,7 +104,7 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
         if (!got_spatial || !got_global || !got_mask)
             throw std::runtime_error("RKNN model has duplicate/missing input names");
 
-        auto infer = [&]() {
+        auto infer = [&](bool verify) {
             check(rknn_inputs_set(ctx, io.n_input, inputs.data()), "rknn_inputs_set");
             check(rknn_run(ctx, nullptr), "rknn_run");
             std::vector<rknn_output> outputs(io.n_output);
@@ -95,6 +115,7 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
             check(rknn_outputs_get(ctx, io.n_output, outputs.data(), nullptr), "rknn_outputs_get");
             bool finite = true;
             bool nonempty = true;
+            bool accurate = true;
             for (uint32_t i = 0; i < io.n_output; i++) {
                 if (!outputs[i].buf || outputs[i].size == 0 || outputs[i].size % sizeof(float)) {
                     nonempty = false;
@@ -104,21 +125,25 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
                 for (size_t j = 0; j < outputs[i].size / sizeof(float); j++) {
                     if (!std::isfinite(values[j])) { finite = false; break; }
                 }
+                if(comparison && verify)
+                    accurate=comparison->check(referenceIndices[i],values,outputs[i].size/sizeof(float),"rknn")&&accurate;
             }
             check(rknn_outputs_release(ctx, io.n_output, outputs.data()), "rknn_outputs_release");
             if (!nonempty) throw std::runtime_error("Missing/empty RKNN output");
             if (!finite) throw std::runtime_error("Non-finite RKNN output (NaN/Inf); model is not validated");
+            if (!accurate) throw std::runtime_error("RKNN network output precision mismatch vs ONNX CPU reference");
         };
 
         std::printf("Running RK3588 Android NPU core=%s warmup=%d runs=%d\n", core.c_str(), warmup, runs);
         std::printf("Input tensors are synthetic, NOT a legal KataGo board encoding. NN inference only.\n");
         std::fflush(stdout);
-        for (int i = 0; i < warmup; i++) infer();
+        for (int i = 0; i < warmup; i++) infer(false);
+        if(comparison)infer(true);
         std::vector<double> times;
         times.reserve(runs);
         for (int i = 0; i < runs; i++) {
             auto t0 = Clock::now();
-            infer();
+            infer(false);
             auto t1 = Clock::now();
             times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
         }
@@ -147,7 +172,7 @@ int main(int argc, char** argv) {
         if ((core != "0" && core != "1" && core != "2" && core != "01" && core != "all" && core != "auto") || warmup < 0 || runs <= 0 || runs > 1000000) {
             throw std::runtime_error("core must be 0|1|2|01|all|auto; warmup >= 0; 0 < runs <= 1000000");
         }
-        return benchmark(argv[1], core, warmup, runs);
+        return benchmark(argv[1], core, warmup, runs, argc>=6?argv[5]:"");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: %s\n", e.what());
         return 1;
