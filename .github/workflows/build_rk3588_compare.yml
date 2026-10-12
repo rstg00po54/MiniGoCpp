@@ -12,6 +12,7 @@ on:
       - 'tools/test_rk3588_compare.py'
       - 'tools/bench_rk3588_compare.sh'
       - 'tools/bench_rk3588_gpu_full.sh'
+      - 'tools/bench_rk3588_gpu_katago.sh'
       - 'tools/bench_rk3588_gpu_ab.sh'
       - 'tools/test_rk3588_gpu_tile.py'
       - 'tools/bench_rk3588_npu.sh'
@@ -42,6 +43,7 @@ jobs:
           set -euo pipefail
           bash -n tools/prepare_rk3588_compare.sh
           bash -n tools/bench_rk3588_gpu_full.sh
+          bash -n tools/bench_rk3588_gpu_katago.sh
           bash -n tools/bench_rk3588_gpu_ab.sh
           bash -n tools/bench_rk3588_compare.sh
           bash -n tools/bench_rk3588_npu.sh
