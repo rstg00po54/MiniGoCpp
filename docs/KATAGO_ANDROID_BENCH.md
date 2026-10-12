@@ -2,6 +2,22 @@
 
 One host-side entry point on **Ubuntu/WSL x86**; use it with RK3588 Android 14 or vivo X300 Pro. The script builds the native ONNX Runtime benchmark using your existing Android NDK 27.2.12479018; **no Python or RKNN Toolkit Lite2 required on Android**.
 
+### Cross-device 10b benchmark status (2026-10-12)
+
+The **2026-10-12 RK3588S** CPU / official KataGo OpenCL GPU / RKNN NPU
+run completed with `PASS / PASS_NATIVE / PASS`: **42.85 / 46.04 / 110.35
+NN evaluations/s**, respectively (19x19, batch=1, 30 measured / 5 warmup).
+The earlier **2026-10-10 vivo X300 Pro MDLA** complete-network run reached
+**700.16 NN evaluations/s**, mean **1.428 ms**, with **1000 measured / 100
+warmup** and five output heads validated. This is about **6.34x the
+RK3588S single-core NPU measured throughput**, an *indicative* cross-device
+ratio, not a fully identical-input and backend comparison.
+
+See [RK3588 CPU/GPU/NPU and vivo measured comparison](RK3588_CPU_GPU_NPU_COMPARE.md#verified-results--rk3588s-and-vivo-x300-pro-october-2026)
+for the full table, methodology limits, and the local RK3588 run path. The
+vivo OpenCL GPU does **not** yet have a comparable complete-network official
+`benchmarknn` measurement in this set; do not substitute MCTS visits/s.
+
 ## Full KataGo 10b on vivo MDLA — one graph, all five output heads
 
 The previous native tests on MT6993 confirmed the actual KataGo `rconv1-rconv4` block stack and the genuine `rconv5` global pooling 1x1 branch. The full KataGo 10b network is now exported in **one** Neuron graph for a 19x19 all-valid board:
