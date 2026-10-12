@@ -14,6 +14,8 @@ on:
       - 'tools/bench_rk3588_gpu_full.sh'
       - 'tools/bench_rk3588_gpu_katago.sh'
       - 'tools/build_rk3588_katago_benchmarknn.sh'
+      - 'tools/create_opencl_android_link_stub.py'
+      - 'tools/test_opencl_android_link_stub.py'
       - 'tools/bench_rk3588_gpu_ab.sh'
       - 'tools/test_rk3588_gpu_tile.py'
       - 'tools/bench_rk3588_npu.sh'
@@ -54,6 +56,7 @@ jobs:
           python3 tools/test_rk3588_compare.py
           python3 -m pip install --user 'numpy>=1.26,<3'
           python3 tools/test_rk3588_gpu_tile.py
+          python3 -m py_compile tools/create_opencl_android_link_stub.py tools/test_opencl_android_link_stub.py
           bash tools/test_bench_android_smoke.sh
       - name: Install Android NDK and runtime toolchain
         env:
@@ -74,6 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          python3 tools/test_opencl_android_link_stub.py "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
           CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
           "$CXX" -std=c++17 -O2 -fPIE -pie tools/gpu_katago_full_android.cpp -ldl \
             -o build/rk3588_compare/gpu_katago_full_android
