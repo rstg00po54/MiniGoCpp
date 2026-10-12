@@ -11,6 +11,8 @@ WARMUP="${WARMUP:-5}"
 GPU_RUNS="${GPU_RUNS:-$RUNS}"
 GPU_WARMUP="${GPU_WARMUP:-$WARMUP}"
 THREADS="${THREADS:-4}"
+# RKNN model expects NHWC input layout. NCHW gives finite but incorrect outputs.
+RKNN_INPUT_LAYOUT="${RKNN_INPUT_LAYOUT:-nhwc}"
 CACHE="${KATAGO_BENCH_CACHE:-$HOME/.cache/minigocpp/androidbench}"
 COMPARE_INPUT_FILE="${COMPARE_INPUT_FILE:-$CACHE/katago10b_shared_input_v1.bin}"
 OUT="${BENCH_RESULTS_DIR:-$ROOT/results/rk3588_$(date +%Y%m%d_%H%M%S)}"
@@ -23,7 +25,7 @@ if ! bash "$ROOT/tools/prepare_rk3588_compare.sh" > "$OUT/prepare.log" 2>&1; the
     exit 1
 fi
 tail -3 "$OUT/prepare.log"
-export ADB ADB_SERIAL RUNS WARMUP THREADS COMPARE_INPUT_FILE KATAGO_BENCH_CACHE="$CACHE"
+export ADB ADB_SERIAL RUNS WARMUP THREADS RKNN_INPUT_LAYOUT COMPARE_INPUT_FILE KATAGO_BENCH_CACHE="$CACHE"
 failed=0
 
 echo "=== CPU: ONNX Runtime, actual entire 10b, FP32 ==="
@@ -37,11 +39,11 @@ if ! GPU_RUNS="$GPU_RUNS" GPU_WARMUP="$GPU_WARMUP" bash "$ROOT/tools/bench_rk358
 fi
 grep -E 'GPU_DEVICE|GPU_GRAPH|GPU_VERIFY|GPU_FULL_NN_(PASS|FAIL)|ERROR' "$OUT/gpu.log" || true
 
-echo "=== NPU: RKNPU2 core 0, entire RKNN 10b ==="
+echo "=== NPU: RKNPU2 core 0, entire RKNN 10b, input layout=$RKNN_INPUT_LAYOUT ==="
 if ! CORE_MODES=0 bash "$ROOT/tools/bench_rk3588_npu.sh" > "$OUT/npu.log" 2>&1; then
     failed=1
 fi
-grep -E 'RKNN runtime|COMPARE_VERIFY|RESULT core=0|ERROR' "$OUT/npu.log" || true
+grep -E 'RKNN_INPUT_LAYOUT|RKNN runtime|COMPARE_VERIFY|RESULT core=0|ERROR' "$OUT/npu.log" || true
 
 echo "=== VALIDATED CPU/GPU/NPU COMPARISON ==="
 if ! python3 "$ROOT/tools/summarize_rk3588_compare.py" --logs "$OUT" --out "$OUT"; then
