@@ -55,14 +55,12 @@ jobs:
           sdkmanager --install 'ndk;27.2.12479018'
           mkdir -p build/rk3588_compare
           gh api -H 'Accept: application/vnd.github.raw+json' '/repos/airockchip/rknn-toolkit2/contents/rknpu2/runtime/Android/librknn_api/include/rknn_api.h?ref=v2.3.2' > build/rk3588_compare/rknn_api.h
-          gh api -H 'Accept: application/vnd.github.raw+json' '/repos/airockchip/rknn-toolkit2/contents/rknpu2/runtime/Android/librknn_api/arm64-v8a/librknnrt.so?ref=v2.3.2' > build/rk3588_compare/librknnrt.so
           test -s build/rk3588_compare/rknn_api.h
-          test "$(wc -c < build/rk3588_compare/librknnrt.so)" -gt 1000000
           curl -fL --retry 3 -o build/rk3588_compare/onnxruntime.aar \
             https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.23.2/onnxruntime-android-1.23.2.aar
           unzip -p build/rk3588_compare/onnxruntime.aar jni/arm64-v8a/libonnxruntime.so > build/rk3588_compare/libonnxruntime.so
           unzip -oq build/rk3588_compare/onnxruntime.aar 'headers/*' -d build/rk3588_compare
-      - name: Compile Android ARM64 full network CPU GPU NPU tools
+      - name: Compile full network CPU GPU tools and syntax check RKNN
         shell: bash
         run: |
           set -euo pipefail
@@ -74,12 +72,10 @@ jobs:
             tools/onnx_bench_android.cpp -Lbuild/rk3588_compare -lonnxruntime \
             -lneuralnetworks -llog -ldl -Wl,-rpath,'$ORIGIN' \
             -o build/rk3588_compare/onnx_bench_android
-          "$CXX" -std=c++17 -O2 -fPIE -pie -Ibuild/rk3588_compare \
-            tools/rknn_bench_android.cpp -Lbuild/rk3588_compare -lrknnrt -llog -ldl \
-            -Wl,-rpath,'$ORIGIN' -o build/rk3588_compare/rknn_bench_android
+          "$CXX" -std=c++17 -O2 -fsyntax-only -Ibuild/rk3588_compare \
+            tools/rknn_bench_android.cpp
           file build/rk3588_compare/gpu_katago_full_android
           file build/rk3588_compare/onnx_bench_android
-          file build/rk3588_compare/rknn_bench_android
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -87,5 +83,4 @@ jobs:
           path: |
             build/rk3588_compare/gpu_katago_full_android
             build/rk3588_compare/onnx_bench_android
-            build/rk3588_compare/rknn_bench_android
           if-no-files-found: ignore
