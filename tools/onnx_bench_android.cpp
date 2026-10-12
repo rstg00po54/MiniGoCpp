@@ -107,7 +107,7 @@ static int run(const std::string& model, const std::string& mode, int warmup, in
     if(!comparePath.empty()) {
         comparison.reset(new KataGoComparisonInput(comparePath));
         spatial=comparison->spatial;globals=comparison->global;mask=comparison->mask;
-        std::printf("COMPARE_INPUT backend=%s source=%s\\n",mode.c_str(),comparePath.c_str());
+        std::printf("COMPARE_INPUT backend=%s source=%s\n",mode.c_str(),comparePath.c_str());
     }
     auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::vector<Ort::Value> values;
