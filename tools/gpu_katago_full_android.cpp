@@ -189,8 +189,8 @@ int ih,int iw,int ic,int oh,int ow,int oc,int kh,int kw,int pt,int pl) {
         for(int kx=0;kx<kw;kx++) {
             int ix=x+kx-pl;
             if(ix<0||ix>=iw)continue;
-            int ii=(iy*iw+ix)*ic,wi=((c*kh+ky)*kw+kx)*ic;
-            for(int ci=0;ci<ic;ci++)sum=fma((float)a[ii+ci],(float)w[wi+ci],sum);
+            int ii=(iy*iw+ix)*ic,wi=((ky*kw+kx)*ic)*oc+c;
+            for(int ci=0;ci<ic;ci++)sum=fma((float)a[ii+ci],(float)w[wi+ci*oc],sum);
         }
     }
     o[index]=(half)sum;
@@ -312,6 +312,31 @@ public:
         conv=cl.kernel(prog,"conv",&rc);ck(rc,"clCreateKernel conv");
         pool=cl.kernel(prog,"pool",&rc);ck(rc,"clCreateKernel pool");
         cat=cl.kernel(prog,"cat",&rc);ck(rc,"clCreateKernel cat");
+        // ONNX packet Conv filters are OHWI (out,kh,kw,in). GPU work-items
+        // vary output channel fastest, so transpose each filter once to HWIO
+        // (kh,kw,in,out) for contiguous coalesced weight loads across GPU lanes.
+        std::vector<bool> transposed(packet.operands.size(),false);
+        for(const auto& op:packet.ops) {
+            if(op.type!=3)continue;
+            const u32 id=op.ins.at(1);
+            if(transposed[id])continue;
+            auto& weight=packet.operands[id];
+            if(weight.dims.size()!=4||weight.type!=FP16)
+                throw std::runtime_error("Unexpected OpenCL filter tensor");
+            size_t oc=weight.dims[0],kh=weight.dims[1],kw=weight.dims[2],ic=weight.dims[3];
+            if(weight.raw.size()!=oc*kh*kw*ic*2)
+                throw std::runtime_error("Bad GPU filter byte size");
+            std::vector<char> hwio(weight.raw.size());
+            for(size_t c=0;c<oc;c++)for(size_t y=0;y<kh;y++)
+                for(size_t x=0;x<kw;x++)for(size_t i=0;i<ic;i++) {
+                    size_t a=(((c*kh+y)*kw+x)*ic+i)*2;
+                    size_t b=(((y*kw+x)*ic+i)*oc+c)*2;
+                    std::memcpy(hwio.data()+b,weight.raw.data()+a,2);
+                }
+            weight.raw.swap(hwio);
+            transposed[id]=true;
+        }
+        std::printf("GPU_CONV_LAYOUT format=HWIO coalesced_weights=yes\n");
         for(auto& o:packet.operands) {
             if(o.type!=FP16)continue;
             if((o.flags&(CONST|INPUT))&&o.raw.size()!=o.count*2)
