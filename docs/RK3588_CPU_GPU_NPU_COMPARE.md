@@ -1,5 +1,64 @@
 # RK3588S: official KataGo OpenCL GPU vs CPU vs NPU
 
+## Verified results — RK3588S and vivo X300 Pro (October 2026)
+
+Latest RK3588S **physical-device PASS** on **2026-10-12**:
+`RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh`,
+LubanCat-4IO RK3588S (Android), 19x19 KataGo 10b, batch=1, NN-only.
+Raw local results were generated at
+`results/rk3588_20261012_151808/` (the directory is a local run artifact,
+not necessarily committed to GitHub).
+
+| Device and backend | Precision / threads | Mean latency (ms) | P50 latency (ms) | Throughput (NN evaluations/s) | Accuracy check |
+| --- | --- | ---: | ---: | ---: | --- |
+| RK3588S CPU, ONNX Runtime | FP32 / 4 threads | 23.335 | 23.200 | **42.85** | PASS, 5/5 output heads |
+| RK3588S Mali-G610, official KataGo v1.18.0 OpenCL `benchmarknn` | FP16 / 1 NN thread | — | 21.673 | **46.04** (wall-clock) | PASS_NATIVE; not checked against shared ONNX reference |
+| RK3588S RKNPU2 Core 0, RKNN runtime 2.3.2 (driver 0.9.8) | RKNN / 1 NPU core | 9.062 | 9.197 | **110.35** | PASS, 5/5 output heads |
+| vivo X300 Pro (MT6993), MediaTek Neuron `mtk-mdla` NPU | FP16 / device-pinned MDLA | 1.428 | 1.439 | **700.16** | PASS, 5/5 output heads at documented FP16 tolerance |
+
+The vivo NPU figure is a **separate physical-device run from 2026-10-10**,
+with **100 warmups and 1000 measured inferences** using
+`RUNS=1000 WARMUP=100 bash tools/bench_mediatek_katago_full.sh mtk-mdla`.
+The vivo network was one complete 126-operation Neuron graph, 19x19 with an
+all-ones mask; full output verification and P95 **1.766 ms** are documented in
+[the vivo benchmark report](KATAGO_ANDROID_BENCH.md#repeated-full-network-vivo-mdla-benchmark--1000-nn-evaluations).
+
+For the latest RK3588 run:
+
+- CPU mean 23.335 ms, P95 23.895 ms; NPU mean 9.062 ms, P95 11.607 ms.
+- GPU KataGo 10b native model: `g170-b10c128-s1141046784-d204142634`,
+  OpenCL on Mali-G610, `usingFP16=true`, `batchSize=1`,
+  `numThreads=1`, `numIterations=30`, `actualWallNNEvalsPerSec=46.03630428`.
+  GPU's 21.673 ms is **a per-thread median, not the mean**.
+- Mali WMMA tuning is skipped because of the OpenCL compiler incompatibility;
+  regular FP16 storage and FP16 compute are enabled. Tuner results are cached.
+- CPU/NPU use the same reference inputs, with all five ONNX output heads
+  passing numerical checks; the GPU benchmark uses native KataGo feature
+  generation and **a different input and timing path**. Therefore the
+  GPU-to-CPU throughput ratio (~1.07x) is **indicative only**, not a strict
+  like-for-like hardware speedup or a five-head verification result.
+- RK3588 NPU/CPU throughput ratio is 110.35 / 42.85 = **2.58x** for the
+  shared-input tests. Vivo MDLA / RK3588 Core-0 throughput is
+  700.16 / 110.35 = **~6.34x**, a **cross-device, different-input/backend**
+  indicative ratio, not a strict controlled speedup. Warmup/run counts
+  also differ between the vivo and RK3588 runs.
+- These are neural-network forward passes, **not KataGo MCTS visits/s,
+  move time, playing strength, or sustained thermal performance**.
+- This four-backend snapshot does **not** include a comparable vivo
+  official KataGo OpenCL `benchmarknn` GPU result.
+
+To reproduce the RK3588 combined test:
+
+```bash
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+The combined runner writes `cpu.log`, `gpu.log`, `npu.log`,
+`comparison.md`, `comparison.csv`, and `comparison.json` into a
+timestamped directory under `results/`.
+
+---
+
 ## Portable OpenCL linking — device-independent (2026-10-12)
 
 The upstream official KataGo v1.18.0 source was successfully cloned, but
