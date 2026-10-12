@@ -96,6 +96,6 @@ fi
 CORE_MODES="${CORE_MODES:-0 1 2 all}"
 for core in $CORE_MODES; do
     echo "===== Android RK3588 NPU core=$core ====="
-    "${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE ./rknn_bench_android katago_10b_19x19.rknn $core $WARMUP $RUNS ${COMPARE_INPUT_FILE:+katago_compare_input.bin}" | tr -d '\r'
+    "${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE ./rknn_bench_android katago_10b_19x19.rknn $core $WARMUP $RUNS '${COMPARE_INPUT_FILE:+katago_compare_input.bin}' '${RKNN_INPUT_LAYOUT:-nchw}'" | tr -d '\r'
 done
 echo "Completed. Results are NPU neural-network evaluations, NOT KataGo visits/s."
