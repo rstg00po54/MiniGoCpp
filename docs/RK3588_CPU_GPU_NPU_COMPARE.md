@@ -1,5 +1,55 @@
 # RK3588S: official KataGo OpenCL GPU vs CPU vs NPU
 
+## Fix for the October 12 native GPU benchmarknn failure
+
+The third RK3588 19×19 NN-only CPU/NPU run yielded CPU **43.28 NN/s**
+(23.103 ms), validated RKNN Core 0 **108.42 NN/s** (9.223 ms,
+correct NHWC input), and **GPU unavailable**. The old
+`/data/local/tmp/katago_bench/katago_gpu` executable was correctly
+detected as an OpenCL build, but it came from the vendored
+`GoEngine-java/native/KataGo` source on `rk3588-engine`,
+which implements the MCTS `benchmark` command **but not**
+`benchmarknn`. The old successful result of 181.39 visits/s is
+therefore a search benchmark, not an NN-only benchmark.
+
+The RK3588 GPU runner now tests `benchmarknn --help` for required
+`--iterations` and `--batch-size` options. If the existing OpenCL
+binary does not support them, the runner **automatically builds official
+KataGo v1.18.0** with OpenCL in the isolated
+`~/.cache/minigocpp/katago_native_v1.18.0/` directory, reusing the
+NDK and RK3588 OpenCL driver previously used for KataGo GPU builds.
+It installs the resulting executable as
+`/data/local/tmp/minigocpp_katago_native/katago_official_nn`.
+The original `katago_gpu`, bundled `10b.bin`, `GoEngine-java`
+and the APK are not overwritten.
+
+The first build requires GitHub source download, Android NDK, CMake,
+Ninja, OpenCL headers, and a valid Android ARM64 OpenCL link library
+(from the earlier working GPU build or the RK3588 EGL driver).
+Set `KATAGO_BUILD_JOBS=2` to limit build parallelism on a low-memory VM
+(default 2). The source/binary are cached so later runs reuse them.
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+To focus only on the previously missing GPU result, without repeating
+CPU/NPU:
+
+```bash
+GPU_RUNS=30 GPU_WARMUP=5 bash tools/bench_rk3588_gpu_katago.sh
+```
+
+If the build is unavailable, `gpu.log` retains the full error rather
+than silently falling back to the handwriting OpenCL baseline.
+The native GPU run should be treated as verified only after the
+official JSON batch=1 result appears, and as a *native-input indicative*
+comparison until matching model lineage and exact inputs are verified.
+
+---
+
 ## Current one-command benchmark (native GPU, 2026-10-12)
 
 The primary `tools/bench_rk3588_compare.sh` now runs **the official KataGo
