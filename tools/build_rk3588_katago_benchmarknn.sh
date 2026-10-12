@@ -22,6 +22,9 @@ case "$JOBS" in ''|*[!0-9]*) echo "ERROR: KATAGO_BUILD_JOBS must be a positive i
 [ "$JOBS" -gt 0 ] || exit 2
 if [ -s "$OUT" ] && [ "${KATAGO_FORCE_REBUILD:-0}" != 1 ] && \
    [ -s "$CACHE/opencl_link_mode.txt" ] && [ "$(cat "$CACHE/opencl_link_mode.txt")" = "LINK_ONLY" ] && \
+   [ -s "$SOURCE/cpp/neuralnet/opencltuner.cpp" ] && \
+   grep -Fq "Skipping unsupported WMMA tuning on Mali OpenCL" "$SOURCE/cpp/neuralnet/opencltuner.cpp" && \
+   [ "$OUT" -nt "$SOURCE/cpp/neuralnet/opencltuner.cpp" ] && \
    LC_ALL=C readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' && \
    ! LC_ALL=C readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
     echo "KATAGO_OFFICIAL_BUILD_REUSED binary=$OUT version=$TAG linked=portable-libOpenCL.so"
@@ -50,6 +53,31 @@ fi
 [ -f "$SOURCE/cpp/command/benchmarknn.cpp" ] || {
     echo "ERROR: Source tag does not have official benchmarknn command" >&2; exit 1;
 }
+# Patch only the isolated cached upstream source. Mali OpenCL drivers fail to compile
+# KataGo's optional WMMA kernel during tuning (upstream issue #977); regular
+# FP16 compute and storage tests remain enabled.
+TUNER="$SOURCE/cpp/neuralnet/opencltuner.cpp"
+python3 - "$TUNER" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+src = p.read_text()
+original = "      bool shouldTestFP16TensorCores = testFP16TensorCoresMode == enabled_t::True || (testFP16TensorCoresMode == enabled_t::Auto && !foundGoodFP16);"
+replacement = original + """
+      // Mali OpenCL drivers fail to compile the optional WMMA kernels.
+      // Skip only WMMA tuning; retain the regular FP16 compute/storage tests.
+      if(device->info.name.find("Mali") != std::string::npos) {
+        out << "Skipping unsupported WMMA tuning on Mali OpenCL" << endl;
+        shouldTestFP16TensorCores = false;
+      }"""
+if replacement in src:
+    print("KATAGO_MALI_WMMA_PATCH reused")
+elif src.count(original) == 1:
+    p.write_text(src.replace(original, replacement, 1))
+    print("KATAGO_MALI_WMMA_PATCH applied")
+else:
+    sys.exit("ERROR: upstream KataGo tuner changed; cannot apply safe Mali WMMA patch")
+PY
 # Use host CL headers only. Never accidentally add host libc include to NDK Clang.
 HEADERS="${KATAGO_OPENCL_HEADERS:-}"
 if [ -z "$HEADERS" ]; then
