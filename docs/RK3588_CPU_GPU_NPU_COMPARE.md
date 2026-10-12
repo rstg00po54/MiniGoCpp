@@ -62,6 +62,42 @@ is **not** an official KataGo GPU benchmark.
 
 ---
 
+### Reuse the existing GoEngine-java RK3588 GPU build
+
+The related project already ran KataGo OpenCL in the **MCTS search**
+benchmark `GoEngine-java/tools/benchmark_katago_android.sh` on
+`8719e18a71a2a66c`. The prior 19×19, 200-visits, five-position
+results were **CPU 72.79 visits/s** versus **GPU 181.39 visits/s**
+(with search settings differing, notably CPU 6 threads and GPU 64
+threads; recorded GPU 181.81 nnEvals/s and mean batch 26.26).
+The separate portable OpenCL binary benchmark recorded 39.66 visits/s
+under other search settings. These search results are **not** Batch=1
+NN-only results.
+
+`tools/bench_rk3588_gpu_katago.sh` now automatically tries the
+existing Android ARM64 OpenCL build at
+`../GoEngine-java/build/katago_android_arm64_openclportable/libkatago_exec_opencl.so`
+and the preinstalled Android executable
+`/data/local/tmp/katago_bench/katago_gpu`.
+It looks for the native `10b.bin` alongside the earlier Android
+benchmark and in the local GoEngine-java assets/model directories.
+
+The script checks the binary's `version` output for a real OpenCL
+build, and only counts results if its `benchmarknn --json`
+command exists. If that earlier binary lacks `benchmarknn`, the
+script reports a clear GPU-unavailable result instead of relabeling
+its `visits/s` as pure network throughput.
+
+Run without recompiling KataGo:
+
+```bash
+cd /mnt/hgfs/D/code/go/MiniGoCpp
+git pull
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+---
+
 ## Historical experimental OpenCL baseline (superseded)
 
 The following sections document the earlier handwritten OpenCL benchmark and
