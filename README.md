@@ -217,3 +217,14 @@ bash tools/bench_android.sh rk          # RK3588：自动运行 RKNN NPU 测速
 通过制造商和 SoC 属性识别连接的设备，不依赖 ADB 列表顺序。如有相同机型的多个连接，可使用 `ADB_SERIAL=设备序列号` 强制选择。**vivo NPU 模式目前是能力检查，不是已经实现的联发科 Neuron 推理测试**；详见 [Android 测试说明](docs/KATAGO_ANDROID_BENCH.md)。
 
 通过 `bash tools/bench_mediatek_neuron.sh` 可单独执行原生 Neuron Adapter API 检测：编译 Android ARM64 C++，ADB 推送，尝试 Neuron 编译、推理并验证结果。这个阶段还不代表 KataGo 10b 已在 vivo NPU 上运行。
+
+
+## RK3588 CPU/GPU/NPU 同口径整网测试
+
+在 RK3588 Android（LubanCat-4IO）上测量 **KataGo 10b 19×19 完整神经网络** 的 CPU (ONNX Runtime)、GPU (Mali OpenCL)、NPU (RKNN)，统一输入，五个网络输出都做数值对照，并自动生成 Markdown / CSV / JSON 对比报告：
+
+```bash
+RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+说明和局限见 [RK3588 CPU/GPU/NPU comparison](docs/RK3588_CPU_GPU_NPU_COMPARE.md)。GPU 实现是独立的、未调优的整网 OpenCL 基线，不能代表 KataGo 高度优化后的 GPU 峰值。尚无真机 GPU 成绩时不会伪造数据。原来的 RKNN、MediaTek NPU 和 KataGo 应用不受影响。
