@@ -112,12 +112,14 @@ if [ -z "$REMOTE_CFG" ]; then
     else
         tmp="$(mktemp)"
         trap 'rm -f "$tmp"' EXIT
+        # Do not set openclTunerFile: a nonempty value forces KataGo to load an existing
+        # tuning file rather than autotune. With HOME=$REMOTE, KataGo automatically
+        # caches device/model-specific tuning under $REMOTE/.katago/opencltuning/.
         cat > "$tmp" <<EOF
 numNNServerThreadsPerModel = 1
 nnMaxBatchSize = 1
 openclDeviceToUse = 0
 openclUseFP16 = auto
-openclTunerFile = $REMOTE/opencltuning.txt
 EOF
         "${ADB_ARGS[@]}" push "$tmp" "$REMOTE_CFG" >/dev/null
     fi
