@@ -71,8 +71,10 @@ def parse_native_gpu(path):
         result["reason"] = "Native KataGo GPU log missing"
         return result
     log = path.read_text(encoding="utf-8", errors="replace")
+    errors = re.findall(r"(?m)^(?:ERROR:|CMake Error[^\\n]*|fatal:|FAILED:|ninja: error:)[^\\n]*", log)
     if "KATAGO_NATIVE_START backend=opencl" not in log:
-        result["reason"] = "Official OpenCL benchmarknn did not start; check KATAGO_BIN and KATAGO_MODEL"
+        result["reason"] = (errors[-1][:240] if errors else
+                            "Official OpenCL benchmarknn did not start; inspect gpu.log for build failure")
         return result
     if not re.search(r"Using OpenCL backend", log, re.IGNORECASE):
         result["reason"] = "KataGo OpenCL compile-time backend was not confirmed"
@@ -89,7 +91,8 @@ def parse_native_gpu(path):
         except (ValueError, TypeError):
             continue
     if not records:
-        result["reason"] = "No official KataGo benchmarknn --json result (older binary may lack benchmarknn)"
+        result["reason"] = (errors[-1][:240] if errors else
+                            "No official KataGo benchmarknn JSON result; inspect full gpu.log")
         return result
     obj = records[-1]
     try:
