@@ -28,12 +28,15 @@ static double percentile(const std::vector<double>& sorted, double p) {
     return sorted[a] + (sorted[b] - sorted[a]) * (index - a);
 }
 
-static int benchmark(const std::string& path, const std::string& core, int warmup, int runs, const std::string& comparePath) {
+static int benchmark(const std::string& path, const std::string& core, int warmup, int runs, const std::string& comparePath, const std::string& inputLayout) {
     std::ifstream file(path, std::ios::binary);
     if (!file) throw std::runtime_error("Cannot open RKNN model: " + path);
     std::vector<char> model((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     if (model.empty()) throw std::runtime_error("RKNN model is empty");
 
+    if(inputLayout!="nchw"&&inputLayout!="nhwc")
+        throw std::runtime_error("RKNN_INPUT_LAYOUT must be nchw or nhwc");
+    std::printf("RKNN_INPUT_LAYOUT requested=%s\n",inputLayout.c_str());
     rknn_context ctx = 0;
     check(rknn_init(&ctx, model.data(), static_cast<uint32_t>(model.size()), 0, nullptr), "rknn_init");
     try {
@@ -101,6 +104,18 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
             inputs[i].size = static_cast<uint32_t>(buffers[i].size() * sizeof(float));
             inputs[i].buf = buffers[i].data();
         }
+        if(inputLayout=="nhwc") {
+            for(uint32_t i=0;i<io.n_input;i++) {
+                const rknn_input& input=inputs[i];
+                if(input.size!=22*19*19*sizeof(float))continue;
+                std::vector<float> reshaped(22*19*19);
+                for(size_t c=0;c<22;c++)for(size_t y=0;y<19;y++)for(size_t x=0;x<19;x++)
+                    reshaped[(y*19+x)*22+c]=buffers[i][c*361+y*19+x];
+                buffers[i]=std::move(reshaped);
+                inputs[i].buf=buffers[i].data();
+            }
+            for(rknn_input& input:inputs)input.fmt=RKNN_TENSOR_NHWC;
+        }
         if (!got_spatial || !got_global || !got_mask)
             throw std::runtime_error("RKNN model has duplicate/missing input names");
 
@@ -122,6 +137,13 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
                     break;
                 }
                 const auto* values = static_cast<const float*>(outputs[i].buf);
+                if(comparison && verify) {
+                    const size_t length=outputs[i].size/sizeof(float);
+                    auto extremes=std::minmax_element(values,values+length);
+                    std::printf("RKNN_OUTPUT_DIAG index=%u head=%s floats=%zu first=%g second=%g min=%g max=%g\\n",
+                                i,KataGoComparisonInput::head(referenceIndices[i]),length,
+                                values[0],length>1?values[1]:values[0],*extremes.first,*extremes.second);
+                }
                 for (size_t j = 0; j < outputs[i].size / sizeof(float); j++) {
                     if (!std::isfinite(values[j])) { finite = false; break; }
                 }
@@ -172,7 +194,8 @@ int main(int argc, char** argv) {
         if ((core != "0" && core != "1" && core != "2" && core != "01" && core != "all" && core != "auto") || warmup < 0 || runs <= 0 || runs > 1000000) {
             throw std::runtime_error("core must be 0|1|2|01|all|auto; warmup >= 0; 0 < runs <= 1000000");
         }
-        return benchmark(argv[1], core, warmup, runs, argc>=6?argv[5]:"");
+        const std::string inputLayout=argc>=7?argv[6]:"nchw";
+        return benchmark(argv[1], core, warmup, runs, argc>=6?argv[5]:"", inputLayout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: %s\n", e.what());
         return 1;
