@@ -195,6 +195,49 @@ int ih,int iw,int ic,int oh,int ow,int oc,int kh,int kw,int pt,int pl) {
     }
     o[index]=(half)sum;
 }
+// Blocked implicit-GEMM convolution: M=spatial points, N=output channels,
+// K=kernel height*kernel width*input channels. Local-memory reuse avoids
+// reloading each input 16 times and each weight across 8 different positions.
+// Each workgroup covers 8 output pixels x 16 output channels, K tiled by 32.
+#define TILE_M 8
+#define TILE_N 16
+#define TILE_K 32
+__kernel void conv_tiled(__global const half* a,__global const half* weights,
+                         __global const half* bias,__global half* out,
+                         int ih,int iw,int ic,int oh,int ow,int oc,int kh,int kw,int pt,int pl) {
+    const int n=get_group_id(0)*TILE_N+get_local_id(0);
+    const int m=get_group_id(1)*TILE_M+get_local_id(1);
+    const int lane=get_local_id(1)*TILE_N+get_local_id(0);
+    const int totalK=kh*kw*ic;
+    __local half A[TILE_M*TILE_K];
+    __local half B[TILE_K*TILE_N];
+    float sum=0.0f;
+    for(int k0=0;k0<totalK;k0+=TILE_K) {
+        for(int t=lane;t<TILE_M*TILE_K;t+=TILE_M*TILE_N) {
+            int localM=t/TILE_K,localK=t%TILE_K;
+            int pixel=get_group_id(1)*TILE_M+localM,k=k0+localK;
+            half v=(half)0;
+            if(pixel<oh*ow&&k<totalK) {
+                int y=pixel/ow,x=pixel%ow;
+                int spatial=k/ic,channel=k%ic;
+                int iy=y+spatial/kw-pt,ix=x+spatial%kw-pl;
+                if(iy>=0&&iy<ih&&ix>=0&&ix<iw)v=a[(iy*iw+ix)*ic+channel];
+            }
+            A[t]=v;
+        }
+        for(int t=lane;t<TILE_K*TILE_N;t+=TILE_M*TILE_N) {
+            int localK=t/TILE_N,localN=t%TILE_N;
+            int k=k0+localK,c=get_group_id(0)*TILE_N+localN;
+            B[t]=(k<totalK&&c<oc)?weights[k*oc+c]:(half)0;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for(int k=0;k<TILE_K;k++)
+            sum=fma((float)A[get_local_id(1)*TILE_K+k],
+                    (float)B[k*TILE_N+get_local_id(0)],sum);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if(m<oh*ow&&n<oc)out[m*oc+n]=(half)(sum+(float)bias[n]);
+}
 __kernel void pool(__global const half* a,__global half* o,int h,int w,int c,int ismax) {
     int ci=get_global_id(0);float v=ismax?-3.402823466e+38F:0.0F;
     for(int i=0;i<h*w;i++) {
@@ -215,7 +258,9 @@ class Runner {
     cl_context ctx=nullptr;
     cl_command_queue q=nullptr;
     cl_program prog=nullptr;
-    cl_kernel ew=nullptr,relu=nullptr,conv=nullptr,pool=nullptr,cat=nullptr;
+    cl_kernel ew=nullptr,relu=nullptr,conv=nullptr,convTiled=nullptr,pool=nullptr,cat=nullptr;
+    bool tiledConv=true;
+    size_t tiledCount=0,directCount=0;
     template<typename T> void set(cl_kernel kernel,u32 index,const T& value){ck(cl.arg(kernel,index,sizeof(value),&value),"clSetKernelArg");}
     void bufarg(cl_kernel kernel,u32 index,u32 id){set(kernel,index,packet.operands.at(id).buffer);}
     static int dim(const Operand& o,int axis) {
@@ -231,6 +276,11 @@ class Runner {
     }
     void launch(cl_kernel k,size_t n) {
         ck(cl.enqueue(q,k,1,nullptr,&n,nullptr,0,nullptr,nullptr),"clEnqueueNDRangeKernel");
+    }
+    void launchTiled(cl_kernel k,int pixels,int outChannels) {
+        const size_t local[]={16,8};
+        const size_t global[]={size_t((outChannels+15)/16*16),size_t((pixels+7)/8*8)};
+        ck(cl.enqueue(q,k,2,nullptr,global,local,0,nullptr,nullptr),"clEnqueueNDRangeKernel tiled");
     }
     void operation(const Op& op) {
         const auto& out=packet.operands[op.outs[0]];
@@ -253,11 +303,14 @@ class Runner {
           }
           case 3: {
               const auto& w=packet.operands[op.ins[1]];
-              bufarg(conv,0,src);bufarg(conv,1,op.ins[1]);bufarg(conv,2,op.ins[2]);bufarg(conv,3,dst);
+              cl_kernel k=tiledConv?convTiled:conv;
+              bufarg(k,0,src);bufarg(k,1,op.ins[1]);bufarg(k,2,op.ins[2]);bufarg(k,3,dst);
               int pars[]={dim(a,1),dim(a,2),dim(a,3),dim(out,1),dim(out,2),dim(out,3),
                           int(w.dims.at(1)),int(w.dims.at(2)),intvalue(op.ins[5]),intvalue(op.ins[3])};
-              for(int i=0;i<10;i++)set(conv,4+i,pars[i]);
-              launch(conv,out.count);break;
+              for(int i=0;i<10;i++)set(k,4+i,pars[i]);
+              if(tiledConv)launchTiled(k,dim(out,1)*dim(out,2),dim(out,3));
+              else launch(k,out.count);
+              break;
           }
           case 31:case 77: {
               bufarg(pool,0,src);bufarg(pool,1,dst);
@@ -282,6 +335,12 @@ class Runner {
     }
 public:
     explicit Runner(const std::string& path):packet(parse(path)) {
+        const char* mode=std::getenv("KATAGO_GPU_CONV");
+        if(mode&&std::strcmp(mode,"direct")==0)tiledConv=false;
+        else if(mode&&std::strcmp(mode,"tiled")!=0)
+            throw std::runtime_error("KATAGO_GPU_CONV must be tiled or direct");
+        for(const auto& op:packet.ops)if(op.type==3)(tiledConv?tiledCount:directCount)++;
+        std::printf("GPU_CONV_KERNEL mode=%s tile=8x16x32 conv_ops=%zu\n",tiledConv?"tiled":"direct",tiledCount+directCount);
         cl.init();
         cl_uint np=0;ck(cl.platforms(0,nullptr,&np),"clGetPlatformIDs");if(!np)throw std::runtime_error("No OpenCL platforms");
         std::vector<cl_platform_id> platforms(np);ck(cl.platforms(np,platforms.data(),nullptr),"clGetPlatformIDs");
@@ -310,6 +369,7 @@ public:
         ew=cl.kernel(prog,"ew",&rc);ck(rc,"clCreateKernel ew");
         relu=cl.kernel(prog,"relu",&rc);ck(rc,"clCreateKernel relu");
         conv=cl.kernel(prog,"conv",&rc);ck(rc,"clCreateKernel conv");
+        convTiled=cl.kernel(prog,"conv_tiled",&rc);ck(rc,"clCreateKernel conv_tiled");
         pool=cl.kernel(prog,"pool",&rc);ck(rc,"clCreateKernel pool");
         cat=cl.kernel(prog,"cat",&rc);ck(rc,"clCreateKernel cat");
         // ONNX packet Conv filters are OHWI (out,kh,kw,in). GPU work-items
@@ -350,7 +410,7 @@ public:
     }
     ~Runner() {
         for(auto& o:packet.operands)if(o.buffer)cl.freeBuffer(o.buffer);
-        for(auto k:{ew,relu,conv,pool,cat})if(k)cl.freeKernel(k);
+        for(auto k:{ew,relu,conv,convTiled,pool,cat})if(k)cl.freeKernel(k);
         if(prog)cl.freeProgram(prog);
         if(q)cl.freeQueue(q);
         if(ctx)cl.freeContext(ctx);
