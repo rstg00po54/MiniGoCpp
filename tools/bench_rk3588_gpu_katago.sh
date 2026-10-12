@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# RK3588 Android: KataGo OFFICIAL OpenCL NN-only benchmark, no MCTS or custom kernels.
+# Supports a host native Android executable/model or pre-existing on-device paths.
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ADB="${ADB:-adb}"
+ADB_SERIAL="$(ADB="$ADB" bash "$ROOT/tools/select_adb_device.sh" rk)"
+ADB_ARGS=("$ADB" -s "$ADB_SERIAL")
+RUNS="${GPU_RUNS:-${RUNS:-30}}"
+WARMUP="${GPU_WARMUP:-${WARMUP:-5}}"
+REMOTE="${KATAGO_REMOTE_DIR:-/data/local/tmp/minigocpp_katago_native}"
+BIN="${KATAGO_BIN:-}"
+MODEL="${KATAGO_MODEL:-}"
+CFG="${KATAGO_CONFIG:-}"
+REMOTE_BIN="${KATAGO_REMOTE_BIN:-}"
+REMOTE_MODEL="${KATAGO_REMOTE_MODEL:-}"
+REMOTE_CFG="${KATAGO_REMOTE_CONFIG:-}"
+case "$RUNS:$WARMUP" in *[!0-9:]*|:*|*:) echo "ERROR: GPU_RUNS and GPU_WARMUP must be integers" >&2; exit 2 ;; esac
+if [ "$RUNS" -lt 1 ] || [ "$WARMUP" -lt 0 ]; then
+    echo "ERROR: GPU_RUNS must be positive, GPU_WARMUP must be nonnegative" >&2; exit 2
+fi
+case "$REMOTE" in /data/local/tmp/*) ;; *) echo "ERROR: KATAGO_REMOTE_DIR must be under /data/local/tmp/" >&2; exit 2 ;; esac
+# Restrict remote paths to safe Android shell path characters.
+check_remote_path() {
+    case "$1" in
+        /*) ;;
+        *) echo "ERROR: expected absolute Android path: $1" >&2; exit 2 ;;
+    esac
+    if [[ "$1" =~ [^a-zA-Z0-9_./+-] ]]; then
+        echo "ERROR: unsupported characters in Android path: $1" >&2; exit 2
+    fi
+}
+for path in "$REMOTE" "$REMOTE_BIN" "$REMOTE_MODEL" "$REMOTE_CFG"; do
+    if [ -n "$path" ]; then check_remote_path "$path"; fi
+done
+# Look only at explicit conventional host paths; never infer .so is an executable.
+if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
+    for candidate in "$ROOT/../GoEngine-java/katago" "$ROOT/../GoEngine-java/build/katago" \
+                     "$ROOT/../KataGo/cpp/katago" "$ROOT/../KataGo/build/katago" \
+                     "$ROOT/../katago/katago"; do
+        if [ -f "$candidate" ]; then BIN="$candidate"; break; fi
+    done
+fi
+if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
+    for candidate in "$ROOT/../GoEngine-java/app/src/main/assets/engine/katago/10b.bin.gz" \
+                     "$ROOT/../KataGo/10b.bin.gz" "$ROOT/../KataGo/models/10b.bin.gz" \
+                     "$ROOT/../GoEngine-java/10b.bin.gz"; do
+        if [ -f "$candidate" ]; then MODEL="$candidate"; break; fi
+    done
+fi
+if [ -z "$BIN" ] && [ -z "$REMOTE_BIN" ]; then
+    echo "ERROR: KataGo Android native executable not found." >&2
+    echo "Set KATAGO_BIN=/path/to/Android/arm64/katago or KATAGO_REMOTE_BIN=/data/local/tmp/.../katago." >&2
+    echo "It must implement 'katago benchmarknn' and use KataGo OpenCL backend, not a JNI .so." >&2
+    exit 1
+fi
+if [ -z "$MODEL" ] && [ -z "$REMOTE_MODEL" ]; then
+    echo "ERROR: Native KataGo 10b .bin.gz model missing (ONNX / RKNN cannot be loaded by native KataGo)." >&2
+    echo "Set KATAGO_MODEL=/path/to/g170-b10c128-...bin.gz or KATAGO_REMOTE_MODEL=/data/local/tmp/.../model.bin.gz." >&2
+    exit 1
+fi
+for path in "$BIN" "$MODEL" "$CFG"; do
+    [ -z "$path" ] || [ -s "$path" ] || { echo "ERROR: Host file missing/empty: $path" >&2; exit 1; }
+done
+"${ADB_ARGS[@]}" get-state >/dev/null || { echo "ERROR: RK3588 ADB offline" >&2; exit 1; }
+"${ADB_ARGS[@]}" shell "mkdir -p $REMOTE"
+if [ -z "$REMOTE_BIN" ]; then
+    REMOTE_BIN="$REMOTE/katago"
+    "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
+fi
+if [ -z "$REMOTE_MODEL" ]; then
+    REMOTE_MODEL="$REMOTE/model.bin.gz"
+    "${ADB_ARGS[@]}" push "$MODEL" "$REMOTE_MODEL" >/dev/null
+fi
+if [ -z "$REMOTE_CFG" ]; then
+    REMOTE_CFG="$REMOTE/benchmarknn.cfg"
+    if [ -n "$CFG" ]; then
+        "${ADB_ARGS[@]}" push "$CFG" "$REMOTE_CFG" >/dev/null
+    else
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        cat > "$tmp" <<EOF
+numNNServerThreadsPerModel = 1
+nnMaxBatchSize = 1
+openclDeviceToUse = 0
+openclUseFP16 = auto
+openclTunerFile = $REMOTE/opencltuning.txt
+EOF
+        "${ADB_ARGS[@]}" push "$tmp" "$REMOTE_CFG" >/dev/null
+    fi
+fi
+# Copy C++ runtime when the host NDK is available; existing remote installs can
+# also be used with KATAGO_REMOTE_BIN and KATAGO_REMOTE_MODEL.
+NDK_DIR="${NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
+if [ -z "$NDK_DIR" ] && [ -d "$HOME/Android/Sdk/ndk/27.2.12479018" ]; then
+    NDK_DIR="$HOME/Android/Sdk/ndk/27.2.12479018"
+fi
+CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+[ ! -s "$CPP_LIB" ] || "${ADB_ARGS[@]}" push "$CPP_LIB" "$REMOTE/libc++_shared.so" >/dev/null
+"${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN" >/dev/null || true
+LIBS="$REMOTE:/vendor/lib64:/system/vendor/lib64:/system/lib64"
+echo "KATAGO_NATIVE_PRECHECK serial=$ADB_SERIAL path=$REMOTE_BIN model=$REMOTE_MODEL"
+# The KataGo 'version' subcommand truthfully identifies compile-time backend.
+version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
+    echo "$version" >&2
+    echo "ERROR: Native KataGo executable cannot run on Android. Check arm64 ABI and shared libraries." >&2
+    exit 1
+}
+echo "$version"
+if ! grep -qi 'Using OpenCL backend' <<< "$version"; then
+    echo "ERROR: Not a KataGo OpenCL build; refusing to label CPU/CUDA/other backend as RK GPU." >&2
+    exit 1
+fi
+# benchmarknn --json emits one result object; host report validates batch=1,
+# 1 NN server thread, board=19 and backend OpenCL before accepting a number.
+echo "KATAGO_NATIVE_START backend=opencl boardsize=19 batch=1 threads=1 runs=$RUNS warmup=$WARMUP"
+"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" | tr -d '\r'
