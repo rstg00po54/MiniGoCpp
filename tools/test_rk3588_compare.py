@@ -31,4 +31,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert data["results"][1]["nn_evals_per_sec"] is None
     (root / "gpu.log").write_text("GPU_FULL_NN_PASS backend=opencl dtype=fp16 mean=5.000 ms p50=4.000 ms p95=6.000 ms nn_evals_per_sec=200.00\n")
     assert not m.generate(root, root), "No numerical verification must never count as PASS"
+    (root / "npu.log").write_text("ERROR: RKNN network output precision mismatch vs ONNX CPU reference\n")
+    assert not m.generate(root, root)
+    data = json.loads((root / "comparison.json").read_text())
+    assert data["results"][2]["status"] == "INVALID_ACCURACY"
+    assert data["results"][2]["nn_evals_per_sec"] is None
 print("PASS RK3588 CPU/GPU/NPU result processing: valid runs, missing GPU and missing verification")
