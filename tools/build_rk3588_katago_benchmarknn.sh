@@ -22,8 +22,8 @@ case "$JOBS" in ''|*[!0-9]*) echo "ERROR: KATAGO_BUILD_JOBS must be a positive i
 [ "$JOBS" -gt 0 ] || exit 2
 if [ -s "$OUT" ] && [ "${KATAGO_FORCE_REBUILD:-0}" != 1 ] && \
    [ -s "$CACHE/opencl_link_mode.txt" ] && [ "$(cat "$CACHE/opencl_link_mode.txt")" = "LINK_ONLY" ] && \
-   readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' && \
-   ! readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
+   LC_ALL=C readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' && \
+   ! LC_ALL=C readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
     echo "KATAGO_OFFICIAL_BUILD_REUSED binary=$OUT version=$TAG linked=portable-libOpenCL.so"
     exit 0
 fi
@@ -74,13 +74,13 @@ if [ ! -s "$LINK_LIB" ] || [ "$ROOT/tools/create_opencl_android_link_stub.py" -n
     python3 "$ROOT/tools/create_opencl_android_link_stub.py" \
         --header "$CACHE/opencl_headers/CL/cl.h" --cc "$CC" --out "$LINK_LIB"
 fi
-readelf -W -h "$LINK_LIB" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
+LC_ALL=C readelf -W -h "$LINK_LIB" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
     echo "ERROR: OpenCL link-only library is not Android ARM64" >&2; exit 1;
 }
-readelf -W -d "$LINK_LIB" | grep -Fq '[libOpenCL.so]' || {
+LC_ALL=C readelf -W -d "$LINK_LIB" | grep -Fq '[libOpenCL.so]' || {
     echo "ERROR: Link-only OpenCL import SONAME is not libOpenCL.so" >&2; exit 1;
 }
-if readelf -W -V "$LINK_LIB" | grep -Eq 'Name: OPENCL_[0-9]'; then
+if LC_ALL=C readelf -W -V "$LINK_LIB" | grep -Eq 'Name: OPENCL_[0-9]'; then
     echo "ERROR: OpenCL link-only import library must have no vendor symbol-version requirements" >&2
     exit 1
 fi
@@ -99,13 +99,13 @@ cmake -Wno-deprecated -S "$SOURCE/cpp" -B "$BUILD" -G Ninja \
     -DCMAKE_CXX_FLAGS="-DLITTLE_ENDIAN=1234 -DBIG_ENDIAN=4321 -DBYTE_ORDER=1234"
 cmake --build "$BUILD" --parallel "$JOBS"
 [ -s "$OUT" ] || { echo "ERROR: Official KataGo Android binary missing after build" >&2; exit 1; }
-readelf -h "$OUT" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
+LC_ALL=C readelf -h "$OUT" | grep -Eq 'Machine:[[:space:]]*AArch64' || {
     echo "ERROR: KataGo binary is not Android ARM64" >&2; exit 1;
 }
-readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' || {
+LC_ALL=C readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' || {
     echo "ERROR: KataGo executable does not have portable DT_NEEDED=libOpenCL.so" >&2; exit 1;
 }
-if readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
+if LC_ALL=C readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
     echo "ERROR: KataGo executable still depends on vendor OPENCL_ symbol version" >&2
     exit 1
 fi
