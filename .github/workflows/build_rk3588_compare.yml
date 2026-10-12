@@ -1,0 +1,88 @@
+name: Build RK3588 CPU GPU NPU Comparison
+
+on:
+  push:
+    paths:
+      - 'tools/gpu_katago_full_android.cpp'
+      - 'tools/prepare_rk3588_compare_input.py'
+      - 'tools/rk3588_compare_input.h'
+      - 'tools/onnx_bench_android.cpp'
+      - 'tools/rknn_bench_android.cpp'
+      - 'tools/summarize_rk3588_compare.py'
+      - 'tools/test_rk3588_compare.py'
+      - 'tools/bench_rk3588_compare.sh'
+      - 'tools/bench_rk3588_gpu_full.sh'
+      - 'tools/bench_rk3588_npu.sh'
+      - 'tools/bench_android.sh'
+      - 'tools/prepare_rk3588_compare.sh'
+      - '.github/workflows/build_rk3588_compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Shell syntax and report parsing regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tools/prepare_rk3588_compare.sh
+          bash -n tools/bench_rk3588_gpu_full.sh
+          bash -n tools/bench_rk3588_compare.sh
+          bash -n tools/bench_rk3588_npu.sh
+          bash -n tools/bench_android.sh
+          python3 -m py_compile tools/prepare_rk3588_compare_input.py tools/summarize_rk3588_compare.py tools/test_rk3588_compare.py
+          python3 tools/test_rk3588_compare.py
+          bash tools/test_bench_android_smoke.sh
+      - name: Install Android NDK and runtime toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install 'ndk;27.2.12479018'
+          mkdir -p build/rk3588_compare
+          BASE="https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v2.3.2/rknpu2/runtime/Android/librknn_api"
+          curl -fL --retry 3 -o build/rk3588_compare/rknn_api.h "$BASE/include/rknn_api.h"
+          curl -fL --retry 3 -o build/rk3588_compare/librknnrt.so "$BASE/arm64-v8a/librknnrt.so"
+          curl -fL --retry 3 -o build/rk3588_compare/onnxruntime.aar \
+            https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.23.2/onnxruntime-android-1.23.2.aar
+          unzip -p build/rk3588_compare/onnxruntime.aar jni/arm64-v8a/libonnxruntime.so > build/rk3588_compare/libonnxruntime.so
+          unzip -oq build/rk3588_compare/onnxruntime.aar 'headers/*' -d build/rk3588_compare
+      - name: Compile Android ARM64 full network CPU GPU NPU tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+          "$CXX" -std=c++17 -O2 -fPIE -pie tools/gpu_katago_full_android.cpp -ldl \
+            -o build/rk3588_compare/gpu_katago_full_android
+          "$CXX" -std=c++17 -O2 -fPIE -pie -Ibuild/rk3588_compare/headers \
+            tools/onnx_bench_android.cpp -Lbuild/rk3588_compare -lonnxruntime \
+            -lneuralnetworks -llog -ldl -Wl,-rpath,'$ORIGIN' \
+            -o build/rk3588_compare/onnx_bench_android
+          "$CXX" -std=c++17 -O2 -fPIE -pie -Ibuild/rk3588_compare \
+            tools/rknn_bench_android.cpp -Lbuild/rk3588_compare -lrknnrt -llog -ldl \
+            -Wl,-rpath,'$ORIGIN' -o build/rk3588_compare/rknn_bench_android
+          file build/rk3588_compare/gpu_katago_full_android
+          file build/rk3588_compare/onnx_bench_android
+          file build/rk3588_compare/rknn_bench_android
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rk3588-10b-cpu-gpu-npu-arm64
+          path: |
+            build/rk3588_compare/gpu_katago_full_android
+            build/rk3588_compare/onnx_bench_android
+            build/rk3588_compare/rknn_bench_android
+          if-no-files-found: ignore
