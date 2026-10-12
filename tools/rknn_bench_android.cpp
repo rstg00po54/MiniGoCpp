@@ -140,7 +140,7 @@ static int benchmark(const std::string& path, const std::string& core, int warmu
                 if(comparison && verify) {
                     const size_t length=outputs[i].size/sizeof(float);
                     auto extremes=std::minmax_element(values,values+length);
-                    std::printf("RKNN_OUTPUT_DIAG index=%u head=%s floats=%zu first=%g second=%g min=%g max=%g\\n",
+                    std::printf("RKNN_OUTPUT_DIAG index=%u head=%s floats=%zu first=%g second=%g min=%g max=%g\n",
                                 i,KataGoComparisonInput::head(referenceIndices[i]),length,
                                 values[0],length>1?values[1]:values[0],*extremes.first,*extremes.second);
                 }
