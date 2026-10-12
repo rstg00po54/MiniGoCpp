@@ -21,6 +21,7 @@ command -v readelf >/dev/null || { echo "ERROR: binutils/readelf missing" >&2; e
 case "$JOBS" in ''|*[!0-9]*) echo "ERROR: KATAGO_BUILD_JOBS must be a positive integer" >&2; exit 2 ;; esac
 [ "$JOBS" -gt 0 ] || exit 2
 if [ -s "$OUT" ] && [ "${KATAGO_FORCE_REBUILD:-0}" != 1 ] && \
+   [ -s "$CACHE/opencl_link_mode.txt" ] && [ "$(cat "$CACHE/opencl_link_mode.txt")" = "LINK_ONLY" ] && \
    readelf -W -d "$OUT" | grep -Fq '[libOpenCL.so]' && \
    ! readelf -W -V "$OUT" | grep -Eq 'Name: OPENCL_[0-9]'; then
     echo "KATAGO_OFFICIAL_BUILD_REUSED binary=$OUT version=$TAG linked=portable-libOpenCL.so"
