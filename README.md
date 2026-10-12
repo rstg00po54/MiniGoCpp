@@ -219,12 +219,18 @@ bash tools/bench_android.sh rk          # RK3588：自动运行 RKNN NPU 测速
 通过 `bash tools/bench_mediatek_neuron.sh` 可单独执行原生 Neuron Adapter API 检测：编译 Android ARM64 C++，ADB 推送，尝试 Neuron 编译、推理并验证结果。这个阶段还不代表 KataGo 10b 已在 vivo NPU 上运行。
 
 
-## RK3588 CPU/GPU/NPU 同口径整网测试
+## RK3588 CPU/GPU/NPU：官方 KataGo GPU 推理对比
 
-在 RK3588 Android（LubanCat-4IO）上测量 **KataGo 10b 19×19 完整神经网络** 的 CPU (ONNX Runtime)、GPU (Mali OpenCL)、NPU (RKNN)，统一输入，五个网络输出都做数值对照，并自动生成 Markdown / CSV / JSON 对比报告：
+CPU 使用 ONNX Runtime，NPU 使用 RKNN（NHWC，5/5 输出验证），GPU 使用 **KataGo 官方 OpenCL `benchmarknn`**，不再使用自写的慢速 OpenCL 卷积程序。
+
+在 Ubuntu 主机执行；需要已编译的 Android ARM64 OpenCL KataGo 命令行程序和原生 10b 权重：
 
 ```bash
+KATAGO_BIN=/path/to/android/arm64/katago \
+KATAGO_MODEL=/path/to/10b.bin.gz \
 RUNS=30 WARMUP=5 THREADS=4 bash tools/bench_rk3588_compare.sh
 ```
 
-说明和局限见 [RK3588 CPU/GPU/NPU comparison](docs/RK3588_CPU_GPU_NPU_COMPARE.md)。GPU 实现是独立的、未调优的整网 OpenCL 基线，不能代表 KataGo 高度优化后的 GPU 峰值。尚无真机 GPU 成绩时不会伪造数据。原来的 RKNN、MediaTek NPU 和 KataGo 应用不受影响。
+如果 Android 开发板上已有能直接执行的 KataGo，也支持 `KATAGO_REMOTE_BIN` 和 `KATAGO_REMOTE_MODEL`。已知位置会自动探测，缺失则明确提示。
+
+结果自动生成 Markdown / CSV / JSON。**GPU 的 benchmarknn 原生输入与 CPU/NPU 的统一 ONNX 参考输入不同**，GPU 吞吐量及探索性倍数会单独标记，避免冒充同一输入的严格性能比较。详细用法见 [RK3588 CPU/GPU/NPU comparison](docs/RK3588_CPU_GPU_NPU_COMPARE.md)。另一项目中的围棋 App 不受影响。
