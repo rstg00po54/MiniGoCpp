@@ -60,32 +60,79 @@ fi
 }
 mkdir -p "$CACHE/opencl_headers/CL"
 cp -a "$HEADERS/CL/." "$CACHE/opencl_headers/CL/"
-# Link ONLY against a real Android ARM64 OpenCL implementation. Prefer the
-# proven EGL Mali library used by the sibling project's portable GPU build.
+# Link only with ARM64 OpenCL libraries defining the actual cl* entrypoints.
+# RK3588 vendor libOpenCL.so may be a versioned OPENCL_1.0 implementation with
+# SONAME libGLES_mali.so. Its symbols ARE valid; the earlier strict unversioned
+# filter incorrectly rejected it and chose /vendor/lib64/egl/libGLES_mali.so.
 has_gpu_api() {
     local file="$1"
     [ -s "$file" ] || return 1
     readelf -W -h "$file" | grep -Eq 'Machine:[[:space:]]*AArch64' || return 1
-    readelf -W --dyn-syms "$file" | awk '$7 != "UND" && $8 ~ /^clGetPlatformIDs(@.*)?$/ {ok=1} END{exit !ok}' || return 1
-    if readelf -W -V "$file" | grep -Eq 'Name: OPENCL_[0-9]'; then return 1; fi
+    readelf -W --dyn-syms "$file" | awk '
+        $7 != "UND" && $8 ~ /^clGetPlatformIDs(@.*)?$/ {p=1}
+        $7 != "UND" && $8 ~ /^clCreateContext(@.*)?$/ {c=1}
+        END {exit !(p&&c)}' || return 1
+}
+describe_gpu_api() {
+    local file="$1"
+    echo "KATAGO_OPENCL_PROBE file=$file"
+    readelf -W -h "$file" | grep -E 'Machine:|Class:' || true
+    readelf -W -d "$file" | grep -E '\\(SONAME\\)' || true
+    readelf -W --dyn-syms "$file" | grep -E 'cl(GetPlatformIDs|CreateContext)(@|[[:space:]]|$)' | head -8 || true
+    readelf -W -V "$file" | grep -E 'Name: OPENCL_[0-9]' | head -5 || true
 }
 LINK_LIB="${KATAGO_OPENCL_ARM64_LIB:-}"
+if [ -n "$LINK_LIB" ]; then
+    if ! has_gpu_api "$LINK_LIB"; then
+        describe_gpu_api "$LINK_LIB"
+        echo "ERROR: Explicit KATAGO_OPENCL_ARM64_LIB is not an ARM64 OpenCL library with both required symbols" >&2
+        exit 1
+    fi
+fi
 if [ -z "$LINK_LIB" ]; then
-    for path in "$HOME/.cache/goengine_katago/opencl_arm64_portable/libGLES_mali.so" \
+    for path in "$HOME/.cache/goengine_katago/opencl_arm64/libOpenCL.so" \
                 "$HOME/.cache/goengine_katago/opencl_arm64_portable/libOpenCL.so" \
-                "$CACHE/libGLES_mali.so" "$CACHE/libOpenCL.so"; do
+                "$HOME/.cache/goengine_katago/opencl_arm64_portable/libGLES_mali.so" \
+                "$CACHE/libOpenCL.so" "$CACHE/libGLES_mali.so"; do
         if has_gpu_api "$path"; then LINK_LIB="$path"; break; fi
     done
 fi
 if [ -z "$LINK_LIB" ]; then
-    echo "KATAGO_OPENCL_LINK: staging vendor EGL Mali library from RK3588"
-    "$ADB" -s "$ADB_SERIAL" pull /vendor/lib64/egl/libGLES_mali.so "$CACHE/libGLES_mali.so" >/dev/null
-    LINK_LIB="$CACHE/libGLES_mali.so"
+    # Probe every vendor path first, without assuming EGL Mali exports OpenCL.
+    # The first vendor libOpenCL.so was already proven usable by GoEngine-java's
+    # existing versioned OpenCL benchmark (it stages this as libGLES_mali.so).
+    for remote in /vendor/lib64/libOpenCL.so /vendor/lib64/libGLES_mali.so \
+                  /vendor/lib64/egl/libGLES_mali.so /system/vendor/lib64/libOpenCL.so; do
+        local_file="$CACHE/vendor_$(echo "$remote" | tr '/' '_')"
+        if [ ! -s "$local_file" ]; then
+            echo "KATAGO_OPENCL_PULL path=$remote"
+            "$ADB" -s "$ADB_SERIAL" pull "$remote" "$local_file" >/dev/null 2>&1 || { rm -f "$local_file"; continue; }
+        fi
+        describe_gpu_api "$local_file"
+        if has_gpu_api "$local_file"; then LINK_LIB="$local_file"; break; fi
+    done
 fi
-if ! has_gpu_api "$LINK_LIB"; then
-    echo "ERROR: $LINK_LIB does not export unversioned ARM64 clGetPlatformIDs" >&2
+if [ -z "$LINK_LIB" ]; then
+    echo "ERROR: No RK3588 ARM64 OpenCL library exports both clGetPlatformIDs and clCreateContext." >&2
+    echo "Inspect KATAGO_OPENCL_PROBE diagnostics; do not fall back to a non-OpenCL EGL library." >&2
     exit 1
 fi
+LINK_LIB="$(realpath "$LINK_LIB")"
+SONAME="$(readelf -W -d "$LINK_LIB" | sed -nE 's/.*\\(SONAME\\).*\\[([^]]+)\\].*/\\1/p' | head -1)"
+case "$SONAME" in
+    libOpenCL.so|libGLES_mali.so) ;;
+    *) echo "ERROR: Unexpected OpenCL SONAME '${SONAME:-empty}' in $LINK_LIB" >&2; exit 1 ;;
+esac
+if readelf -W -V "$LINK_LIB" | grep -Eq 'Name: OPENCL_[0-9]'; then
+    echo "KATAGO_OPENCL_LINK_VERSION=OPENCL_1.0_OR_NEWER"
+else
+    echo "KATAGO_OPENCL_LINK_VERSION=UNVERSIONED"
+fi
+echo "KATAGO_OPENCL_SELECTED file=$LINK_LIB soname=$SONAME"
+# Kept as a manifest so the Android GPU launcher stages the SAME vendor
+# library under its NEEDED SONAME; a different EGL Mali build may be ABI-incompatible.
+printf '%s\\n' "$LINK_LIB" > "$CACHE/opencl_link_file.txt"
+printf '%s\\n' "$SONAME" > "$CACHE/opencl_link_soname.txt"
 echo "KATAGO_OFFICIAL_CONFIG tag=$TAG ndk=$NDK opencl=$LINK_LIB headers=$HEADERS jobs=$JOBS"
 cmake -Wno-deprecated -S "$SOURCE/cpp" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
