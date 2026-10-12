@@ -96,7 +96,7 @@ for path in "$BIN" "$MODEL" "$CFG"; do
     [ -z "$path" ] || [ -s "$path" ] || { echo "ERROR: Host file missing/empty: $path" >&2; exit 1; }
 done
 "${ADB_ARGS[@]}" get-state >/dev/null || { echo "ERROR: RK3588 ADB offline" >&2; exit 1; }
-"${ADB_ARGS[@]}" shell "mkdir -p $REMOTE"
+"${ADB_ARGS[@]}" shell "mkdir -p $REMOTE $REMOTE/.katago"
 if [ -z "$REMOTE_BIN" ]; then
     REMOTE_BIN="$REMOTE/katago"
     "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
@@ -134,7 +134,7 @@ CPP_LIB="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-
 LIBS="$REMOTE:$(dirname "$REMOTE_BIN"):/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
 echo "KATAGO_NATIVE_PRECHECK serial=$ADB_SERIAL path=$REMOTE_BIN model=$REMOTE_MODEL"
 # The KataGo 'version' subcommand truthfully identifies compile-time backend.
-version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
+version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\r')" || {
     echo "$version" >&2
     echo "ERROR: Native KataGo executable cannot run on Android. Check arm64 ABI and shared libraries." >&2
     exit 1
@@ -148,7 +148,7 @@ fi
 # but they do NOT implement the pure-NN "benchmarknn" subcommand. Check the
 # command before running so a zero-exit unknown-command message is never parsed
 # as a successful GPU run.
-benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
+benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
 if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
     echo "KATAGO_NATIVE_OLD_BINARY benchmarknn unsupported: $REMOTE_BIN"
     if [ "${KATAGO_AUTOBUILD:-1}" != 1 ]; then
@@ -164,14 +164,14 @@ if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-
     "${ADB_ARGS[@]}" push "$BIN" "$REMOTE_BIN" >/dev/null
     "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE_BIN"
     LIBS="$REMOTE:/vendor/lib64/egl:/vendor/lib64:/system/vendor/lib64:/system/lib64"
-    version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\\r')" || {
+    version="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN version" 2>&1 | tr -d '\\r')" || {
         echo "$version" >&2; echo "ERROR: Official KataGo v1.18 OpenCL binary cannot execute on RK3588" >&2; exit 1;
     }
     echo "$version"
     grep -qi 'Using OpenCL backend' <<< "$version" || {
         echo "ERROR: The newly built KataGo is not an OpenCL backend" >&2; exit 1;
     }
-    benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
+    benchmark_help="$("${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn --help" 2>&1 | tr -d '\\r')" || true
     if ! grep -Fq -- '--iterations' <<< "$benchmark_help" || ! grep -Fq -- '--batch-size' <<< "$benchmark_help"; then
         echo "$benchmark_help" >&2
         echo "ERROR: Official KataGo build does not support expected benchmarknn CLI" >&2
@@ -182,4 +182,4 @@ fi
 # benchmarknn --json emits one result object; host report validates batch=1,
 # 1 NN server thread, board=19 and backend OpenCL before accepting a number.
 echo "KATAGO_NATIVE_START backend=opencl boardsize=19 batch=1 threads=1 runs=$RUNS warmup=$WARMUP"
-"${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" 2>&1 | tr -d '\r'
+"${ADB_ARGS[@]}" shell "cd $REMOTE && HOME=$REMOTE TMPDIR=$REMOTE LD_LIBRARY_PATH=$LIBS $REMOTE_BIN benchmarknn -model $REMOTE_MODEL -config $REMOTE_CFG --boardsize 19 --batch-size 1 --iterations $RUNS --warmup $WARMUP --json" 2>&1 | tr -d '\r'
