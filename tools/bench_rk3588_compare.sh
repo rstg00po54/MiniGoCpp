@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-command, validated native NN-only comparison on RK3588 Android.
-# CPU=ONNX Runtime FP32; GPU=OpenCL FP16; NPU=RKNN core0.
-# Same original KataGo10b 19x19 graph and shared feature input.
+# CPU=ONNX Runtime FP32; GPU=official KataGo OpenCL benchmarknn; NPU=RKNN core0.
+# GPU is native KataGo NN-only (different feature inputs/timing), and must be
+# clearly reported as a separate workload, not artificially identical to CPU/NPU.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADB="${ADB:-adb}"
@@ -33,11 +34,11 @@ if ! BENCH_LOG="$OUT/cpu.log" bash "$ROOT/tools/bench_android.sh" rk cpu; then
     failed=1
 fi
 
-echo "=== GPU: Mali OpenCL, original entire 10b, FP16 ==="
-if ! GPU_RUNS="$GPU_RUNS" GPU_WARMUP="$GPU_WARMUP" bash "$ROOT/tools/bench_rk3588_gpu_full.sh" > "$OUT/gpu.log" 2>&1; then
+echo "=== GPU: KataGo official OpenCL benchmarknn (NN-only, native features) ==="
+if ! GPU_RUNS="$GPU_RUNS" GPU_WARMUP="$GPU_WARMUP" bash "$ROOT/tools/bench_rk3588_gpu_katago.sh" > "$OUT/gpu.log" 2>&1; then
     failed=1
 fi
-grep -E 'GPU_DEVICE|GPU_GRAPH|GPU_VERIFY|GPU_FULL_NN_(PASS|FAIL)|ERROR' "$OUT/gpu.log" || true
+grep -E 'Using OpenCL backend|KATAGO_NATIVE_(PRECHECK|START)|actualWallNNEvalsPerSec|ERROR|Unrecognized' "$OUT/gpu.log" || true
 
 echo "=== NPU: RKNPU2 core 0, entire RKNN 10b, input layout=$RKNN_INPUT_LAYOUT ==="
 if ! CORE_MODES=0 bash "$ROOT/tools/bench_rk3588_npu.sh" > "$OUT/npu.log" 2>&1; then
@@ -45,7 +46,7 @@ if ! CORE_MODES=0 bash "$ROOT/tools/bench_rk3588_npu.sh" > "$OUT/npu.log" 2>&1; 
 fi
 grep -E 'RKNN_INPUT_LAYOUT|RKNN runtime|COMPARE_VERIFY|RESULT core=0|ERROR' "$OUT/npu.log" || true
 
-echo "=== VALIDATED CPU/GPU/NPU COMPARISON ==="
+echo "=== CPU/NPU validated reference; GPU KataGo-native NN benchmark (separately labeled) ==="
 if ! python3 "$ROOT/tools/summarize_rk3588_compare.py" --logs "$OUT" --out "$OUT"; then
     failed=1
 fi
