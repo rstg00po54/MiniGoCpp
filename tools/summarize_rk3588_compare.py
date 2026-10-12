@@ -40,6 +40,8 @@ def parse_backend(name, path):
     if not matches:
         failures = re.findall(r"(?:GPU_FULL_NN_FAIL|ERROR|FAILED)[^\n]*", log)
         result["reason"] = failures[-1][:200] if failures else "No confirmed NN-only benchmark result"
+        if "precision mismatch" in log.lower() or "accuracy verification failed" in log.lower():
+            result["status"] = "INVALID_ACCURACY"
         return result
     checks = verify_pattern.findall(log)
     good = {head for head, wrong, total in checks if head in HEADS and int(wrong) == 0 and int(total) > 0}
