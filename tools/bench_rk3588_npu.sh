@@ -72,7 +72,8 @@ CXX="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-
 [ -x "$CXX" ] || { echo "ERROR: Missing NDK compiler: $CXX" >&2; exit 1; }
 
 BIN="$CACHE/rknn_bench_android"
-if [ ! -x "$BIN" ] || [ "$ROOT/tools/rknn_bench_android.cpp" -nt "$BIN" ]; then
+if [ ! -x "$BIN" ] || [ "$ROOT/tools/rknn_bench_android.cpp" -nt "$BIN" ] || \
+   [ "$ROOT/tools/rk3588_compare_input.h" -nt "$BIN" ]; then
     echo "Building Android ARM64 NPU benchmark..."
     "$CXX" -std=c++17 -O2 -fPIE -pie -I"$CACHE" "$ROOT/tools/rknn_bench_android.cpp" \
         -L"$CACHE" -lrknnrt -llog -ldl -Wl,-rpath,'$ORIGIN' -o "$BIN"
@@ -86,11 +87,15 @@ echo "Pushing native benchmark, RKNN model and Android runtime via ADB..."
 LIBCPP="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 if [ -s "$LIBCPP" ]; then "${ADB_ARGS[@]}" push "$LIBCPP" "$REMOTE/libc++_shared.so"; fi
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/rknn_bench_android"
+if [ -n "${COMPARE_INPUT_FILE:-}" ]; then
+    [ -s "$COMPARE_INPUT_FILE" ] || { echo "ERROR: No shared input: $COMPARE_INPUT_FILE" >&2; exit 1; }
+    "${ADB_ARGS[@]}" push "$COMPARE_INPUT_FILE" "$REMOTE/katago_compare_input.bin" >/dev/null
+fi
 # Default compares the three individual cores with the combined-core mode.
 # Override: CORE_MODES="0 all" or CORE_MODES="all 2 1 0".
 CORE_MODES="${CORE_MODES:-0 1 2 all}"
 for core in $CORE_MODES; do
     echo "===== Android RK3588 NPU core=$core ====="
-    "${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE ./rknn_bench_android katago_10b_19x19.rknn $core $WARMUP $RUNS" | tr -d '\r'
+    "${ADB_ARGS[@]}" shell "cd $REMOTE && LD_LIBRARY_PATH=$REMOTE ./rknn_bench_android katago_10b_19x19.rknn $core $WARMUP $RUNS ${COMPARE_INPUT_FILE:+katago_compare_input.bin}" | tr -d '\r'
 done
 echo "Completed. Results are NPU neural-network evaluations, NOT KataGo visits/s."
