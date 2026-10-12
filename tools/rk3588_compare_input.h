@@ -43,7 +43,7 @@ struct KataGoComparisonInput {
             if(!std::isfinite(observed[j])||d>0.05+0.06*std::abs(target[j]))wrong++;
             maxerr=std::max(maxerr,d);mean+=d;
         }
-        std::printf("COMPARE_VERIFY backend=%s output=%s wrong=%zu/%zu max_abs=%.6f mean_abs=%.6f\\n",
+        std::printf("COMPARE_VERIFY backend=%s output=%s wrong=%zu/%zu max_abs=%.6f mean_abs=%.6f\n",
             backend,head(index),wrong,count,maxerr,mean/count);
         return wrong==0;
     }
