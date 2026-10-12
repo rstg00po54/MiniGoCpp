@@ -128,3 +128,42 @@ HWIO for coalesced GPU memory access, and **needs a new RK3588 run with numeric
 verification** before its speed can be claimed. An OpenCL throughput result
 from this deliberately untuned implementation is not the Mali hardware peak.
 
+
+## Verified RK3588S rerun — GPU layout optimized, NPU input fixed (2026-10-12)
+
+**The NPU accuracy issue was an incorrect runtime input tensor layout, not proof
+of defective RKNN model conversion.** The RKNN model declares NHWC; the host
+formerly set `RKNN_TENSOR_NCHW` for nonzero spatial inputs. Explicitly
+transposing into NHWC and setting `RKNN_TENSOR_NHWC` solved all five output
+mismatches against the original ONNX CPU reference.
+
+| Backend | Mean latency | NN evals/s | Accuracy | Measured runs |
+| --- | ---: | ---: | --- | ---: |
+| CPU (4 threads, FP32) | 23.229 ms | 43.05 | PASS, 5/5 output heads | 30 |
+| GPU (Mali-G610 FP16, generic OpenCL, optimized HWIO layout) | 143.503 ms | 6.97 | PASS, 5/5 | 10 |
+| NPU (RKNN Core 0, NHWC input) | 5.845 ms | 171.10 | PASS, 5/5 | 5 |
+
+The NPU is about **3.97× as fast as CPU** and **24.55× as fast as this
+unoptimized GPU implementation** in NN evaluations/second. GPU HWIO reordering
+improved the OpenCL baseline **2.82×** over its previous 404.555 ms per
+evaluation / 2.47 evals/s. The GPU numbers are **not** a well-tuned Mali-G610
+limit. The three measurements used different run counts (30/10/5), so repeat
+with matched counts and warmups for a stable comparison.
+
+NPU per-head maximum absolute error was: PolicyPass 0.000100, Policy
+0.002833, Value 0.001165, ScoreValue 0.001204, and Ownership 0.000290;
+all heads reported 0 incorrect elements with the chosen FP16 comparison tolerance.
+The earlier NCHW five-head failure is preserved above as diagnostic history.
+
+As of this result the comparison and direct RKNN benchmark **default to NHWC**.
+For matched run counts:
+
+```bash
+git pull
+RUNS=100 WARMUP=20 THREADS=4 bash tools/bench_rk3588_compare.sh
+```
+
+The wrapper still retains the `RKNN_INPUT_LAYOUT` override for controlled
+debugging (e.g. `RKNN_INPUT_LAYOUT=nchw`), and **will not report a PASS
+when its five output heads fail reference validation**.
+
