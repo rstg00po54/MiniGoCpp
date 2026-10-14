@@ -1,0 +1,116 @@
+name: Build KataGo RKNN 9x9 and 13x13
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/katago_rknn_multisize.yml'
+      - 'tools/convert_katago_multisize_rknn.py'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create separate release, preserving validated 19x19
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view katago-10b-rknn-multisize-v1 >/dev/null 2>&1; then
+            gh release create katago-10b-rknn-multisize-v1 \
+              --title "KataGo 10b 9x9 and 13x13 RK3588 NPU" \
+              --notes "Experimental size-specific RKNN models; generated independently from the same KataGo g170 10b weights with KataGo 1.18.1 dumponnx. Native NN inputs/outputs and board inference still require RK3588 validation. The previously validated 19x19 release is unchanged."
+          fi
+
+  convert:
+    needs: prepare-release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        size: [9, 13]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install RKNN Toolkit2 dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libglib2.0-0 unzip
+          python -m pip install --upgrade pip
+          python -m pip install 'torch==2.4.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'numpy==1.26.4' 'onnx==1.18.0' 'onnxruntime==1.19.2' 'protobuf==4.25.4' \
+            'scipy==1.14.1' 'psutil>=5.9' 'ruamel.yaml>=0.17.21' 'tqdm>=4.64' \
+            'opencv-python-headless==4.10.0.84' 'fast-histogram>=0.11'
+          python -m pip install --no-deps 'rknn-toolkit2==2.3.2'
+          python -c "import onnx; from rknn.api import RKNN; print('RKNN Toolkit2 imported')"
+
+      - name: Download official KataGo ONNX dumper and original 10b weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p models katago-dist
+          curl -fL --retry 3 \
+            -o katago-dist.zip \
+            'https://github.com/lightvector/KataGo/releases/download/v1.18.1/katago-v1.18.1-onnx-openvino-linux-x64.zip'
+          unzip -q katago-dist.zip -d katago-dist
+          KATAGO_BIN="$(find "$PWD/katago-dist" -type f -name katago -print -quit)"
+          test -n "$KATAGO_BIN"
+          chmod +x "$KATAGO_BIN"
+          echo "KATAGO_BIN=$KATAGO_BIN" >> "$GITHUB_ENV"
+          LIBPATH="$(find "$PWD/katago-dist" -type f -name '*.so*' -printf '%h\n' | sort -u | paste -sd: -)"
+          echo "LD_LIBRARY_PATH=$LIBPATH" >> "$GITHUB_ENV"
+          curl -fL --retry 3 -o models/10b.bin \
+            'https://raw.githubusercontent.com/rstg00po54/go/rk3588-engine/GoEngine-java/app/src/main/assets/engine/10b.bin'
+          test "$(wc -c < models/10b.bin)" -eq 12003218
+          sha256sum models/10b.bin
+
+      - name: Export true size-specific ONNX from KataGo weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$KATAGO_BIN" dumponnx -model models/10b.bin \
+            -out models/10b_${{ matrix.size }}x${{ matrix.size }}.onnx \
+            -nn-x-len ${{ matrix.size }} -nn-y-len ${{ matrix.size }}
+          test -s models/10b_${{ matrix.size }}x${{ matrix.size }}.onnx
+
+      - name: Compile and validate RKNN
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -u tools/convert_katago_multisize_rknn.py \
+            --size ${{ matrix.size }} \
+            --onnx models/10b_${{ matrix.size }}x${{ matrix.size }}.onnx \
+            --prepared models/10b_${{ matrix.size }}x${{ matrix.size }}_opset19.onnx \
+            --output models/katago_10b_${{ matrix.size }}x${{ matrix.size }}.rknn \
+            2>&1 | tee rknn_convert_${{ matrix.size }}.log
+          sha256sum models/katago_10b_${{ matrix.size }}x${{ matrix.size }}.rknn > models/katago_10b_${{ matrix.size }}x${{ matrix.size }}.rknn.sha256
+
+      - name: Upload validated conversion artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload katago-10b-rknn-multisize-v1 \
+            models/katago_10b_${{ matrix.size }}x${{ matrix.size }}.rknn \
+            models/katago_10b_${{ matrix.size }}x${{ matrix.size }}.rknn.sha256 --clobber
+
+      - name: Preserve logs, ONNX and RKNN for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: katago-rknn-${{ matrix.size }}x${{ matrix.size }}
+          path: |
+            rknn_convert_*.log
+            models/*.onnx
+            models/*.rknn
+            models/*.sha256
+          if-no-files-found: ignore
