@@ -77,5 +77,23 @@ int main() {
         assert(std::abs(same.value-after.value)<0.000001f);
         assert(std::abs(same.logits[4]-after.logits[4])<0.000001f);
     }
+    // Device-neutral callback must reproduce the original CPU MCTS implementation.
+    // Same model, position and simulation count -> same search visits/value.
+    {
+        Network n(3,16,42);
+        Board b(3);
+        auto cpu = searchMCTS(b,n,40);
+        int evaluated=0;
+        NetworkEvaluator callback = [&](const std::vector<float>& input) {
+            ++evaluated;
+            return n.predict(input);
+        };
+        auto generic = searchMCTS(b,callback,40);
+        assert(evaluated>0);
+        assert(cpu.policy.size()==generic.policy.size());
+        for (size_t i=0; i<cpu.policy.size(); ++i)
+            assert(std::abs(cpu.policy[i]-generic.policy[i])<1e-6f);
+        assert(std::abs(cpu.rootValue-generic.rootValue)<1e-6f);
+    }
     std::cout << "PASS: moves, capture, suicide, superko, double pass, scoring, MCTS, backprop, save/load\n";
 }
