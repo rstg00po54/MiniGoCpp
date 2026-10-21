@@ -102,3 +102,32 @@ ADB_SERIAL=8719e18a71a2a66c bash tools/run_minigo_rk3588_android.sh
 ```
 
 失败时保留完整终端日志；出现 `rknn_init failed` 或驱动兼容问题时同时检查 `adb logcat`。**能成功编译 RKNN，不等于已经验证板端精度和运行速度。**
+
+## 6. 完整下棋：MiniGoCpp MCTS + RK3588 NPU（3×3）
+
+**这是真正的自我对弈**，不是对空棋盘重复测速。新增的 `tools/minigo_rknn_selfplay_android.cpp` 链接原项目 `src/board.cpp`（落子、提子、禁自杀、超级劫、终局计分）与 `src/search.cpp`（原来的 PUCT/MCTS）。新增的 `NetworkEvaluator` 回调负责从搜索中调用 RKNN Runtime，只有神经网络前向计算在 NPU 上；CPU 继续负责棋盘和搜索树。
+
+在 Ubuntu 的仓库根目录，确保本地已有 `models/my3.rknn`，且 RK3588 Android 已连接 ADB：
+
+```bash
+git pull
+bash tools/run_minigo_rknn_selfplay_android.sh
+```
+
+脚本自动选择 RK3588、编译 Android ARM64 C++、ADB 上传、运行 1 局（每手搜索 24 次）、打印每手棋盘与统计结果，然后将 SGF 棋谱拉回 Ubuntu 的 `results/minigo_rknn_selfplay_时间戳/`。每次运行保存 `game.log` 和 `game_001.sgf`，可用围棋棋谱软件打开。
+
+指定更多对局与搜索次数：
+
+```bash
+SIMS=80 GAMES=5 SEED=123 CORE=0 bash tools/run_minigo_rknn_selfplay_android.sh
+```
+
+指定不同的 RKNN 模型或输出目录：
+
+```bash
+OUTPUT=results/my_npu_games bash tools/run_minigo_rknn_selfplay_android.sh models/my3.rknn
+```
+
+输出指标：`GAME_RESULT`（胜者、黑方相对白方的计分差、步数、NN 推理次数、整局耗时）和 `SELFPLAY_DONE`（总胜局、推理次数、NN 平均调用耗时）。程序每局包含双 PASS 或最多 `4*n*n` 步结束，与 MiniGoCpp 的 `Board` 实现一致。开局采取与原 `train` 一样的访问概率抽样，后段取访问最多的落点。只支持 3×3 `my3.rknn` 模型，不支持 KataGo RKNN。
+
+**验收边界：**已提交运行器、启动脚本和 CPU MCTS 回调回归测试；此功能仍需在你的 RK3588 Android 上实际运行后才能确认 NPU 与 MCTS 联合对弈正常。NPU FP16 推理可能与 CPU FP32 有细微差异，尚未完成逐局数值对照。
