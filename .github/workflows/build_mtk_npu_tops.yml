@@ -7,6 +7,9 @@ on:
       - 'MTK_NPU_Benchmark/run_tops.sh'
       - 'tools/test_npu_tops_autodetect.sh'
       - 'tools/select_adb_device.sh'
+      - 'tools/rk3588_tops_android.cpp'
+      - 'tools/bench_rk3588_tops.sh'
+      - 'tools/build_rk3588_tops_model.py'
       - '.github/workflows/build_mtk_npu_tops.yml'
   workflow_dispatch:
 
@@ -24,6 +27,8 @@ jobs:
         run: |
           bash -n MTK_NPU_Benchmark/run_tops.sh
           bash -n tools/test_npu_tops_autodetect.sh
+          bash -n tools/bench_rk3588_tops.sh
+          python3 -m py_compile tools/build_rk3588_tops_model.py
           bash tools/test_npu_tops_autodetect.sh
       - name: Install Android NDK r27
         run: sdkmanager --install 'ndk;27.2.12479018'
@@ -36,6 +41,14 @@ jobs:
           mkdir -p build/mtk_tops
           "$CXX" -std=c++17 -O2 -Wall -Wextra -fPIE -pie MTK_NPU_Benchmark/neuron_tops_android.cpp -ldl -o build/mtk_tops/neuron_tops_android
           file build/mtk_tops/neuron_tops_android
+      - name: Compile RK3588 native INT8 runner against upstream RKNN API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/rknn_tops
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v2.3.2/rknpu2/runtime/Android/librknn_api/include/rknn_api.h -o build/rknn_tops/rknn_api.h
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -fsyntax-only -Ibuild/rknn_tops tools/rk3588_tops_android.cpp
       - uses: actions/upload-artifact@v4
         with:
           name: mediatek-neuron-tops-android-arm64
