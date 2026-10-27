@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ADB native NPU benchmark: auto-detect vivo/MediaTek vs RK3588/RKNN.
-# vivo: FP16 effective convolution TOPS; RK3588: KataGo 10b NN/s (NOT TOPS).
+# vivo: FP16/INT8 effective convolution TOPS; RK3588: KataGo 10b NN/s (NOT TOPS).
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HERE="$ROOT/MTK_NPU_Benchmark"
