@@ -7,6 +7,7 @@ HERE="$ROOT/MTK_NPU_Benchmark"
 ADB="${ADB:-adb}"
 PROFILE="${1:-all}"
 DEVICE="${2:-auto}"
+PRECISION="${3:-fp16}"
 WARMUP="${WARMUP:-20}"
 RUNS="${RUNS:-100}"
 
@@ -16,6 +17,9 @@ case "$PROFILE" in all|go19|small|medium|large|heavy) ;; *)
 esac
 case "$DEVICE" in auto|mtk-mdla|mtk-dsp|rk) ;; *)
     die "device argument must be auto/mtk-mdla/mtk-dsp/rk" ;;
+esac
+case "$PRECISION" in fp16|int8) ;; *)
+    die "precision must be fp16 or int8" ;;
 esac
 [[ "$WARMUP" =~ ^[0-9]+$ && "$RUNS" =~ ^[0-9]+$ ]] || die "RUNS/WARMUP must be integers"
 (( ${#WARMUP} <= 5 && ${#RUNS} <= 5 )) || die "RUNS/WARMUP out of range"
@@ -52,6 +56,9 @@ echo "Selected ADB: $SERIAL"
 echo "Detected backend: $BACKEND (${INFO//$'\n'/ | })"
 
 if [ "$BACKEND" = rk ]; then
+    if [ "$PRECISION" = int8 ]; then
+        die "RK3588 INT8 TOPS kernel is not implemented; the existing RKNN KataGo test reports NN/s only. Use default fp16-compatible entry or a vivo device for INT8 TOPS."
+    fi
     case "$PROFILE" in all|go19) ;; *)
         die "RK3588 currently supports only profile all/go19 (KataGo 10b 19x19 RKNN NN benchmark), not $PROFILE. RKNN result is NN/s, not TOPS." ;;
     esac
@@ -67,8 +74,8 @@ fi
 
 # Neuron Adapter benchmark for vivo. Default device must not be RKNN on vivo.
 if [ "$DEVICE" = auto ]; then DEVICE="mtk-mdla"; fi
-LOG="$HERE/results/$(date +%Y%m%d_%H%M%S)_${PROFILE}_${DEVICE}.log"
-echo "vivo -> Neuron Adapter: $DEVICE profile=$PROFILE warmup=$WARMUP runs=$RUNS"
+LOG="$HERE/results/$(date +%Y%m%d_%H%M%S)_${PROFILE}_${DEVICE}_${PRECISION}.log"
+echo "vivo -> Neuron Adapter: $DEVICE precision=$PRECISION profile=$PROFILE warmup=$WARMUP runs=$RUNS"
 echo "Report: $LOG"
 if [ "${TOPS_DRY_RUN:-0}" = 1 ]; then exit 0; fi
 
@@ -99,7 +106,7 @@ fi
 # Use the same Neuron loader search paths as the previously working
 # tools/bench_mediatek_katago_full.sh. Avoid shadowing system_ext dependencies
 # with vendor libraries that happen to have the same sonames.
-CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS"
+CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS $PRECISION"
 if command -v timeout >/dev/null 2>&1; then
     timeout "${NEURON_TIMEOUT:-300}" "${ADB_ARGS[@]}" shell "$CMD" 2>&1 | tee "$LOG"
 else
