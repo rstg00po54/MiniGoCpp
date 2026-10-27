@@ -64,17 +64,41 @@ static float reference(const Case& c, const std::vector<float>& input,
     }
     return sum;
 }
+// Use model-native quantized bytes and exact model input layout instead of
+// relying on SDK implicit NCHW float->NHWC INT8 conversion. This avoids an
+// extra host copy/quantization inside the benchmark timing as well.
+static std::vector<uint8_t> packInput(const Case& c, const rknn_tensor_attr& attr,
+                                      const std::vector<float>& src) {
+    if (src.size() != size_t(c.h) * c.w * c.ci)
+        throw std::runtime_error("wrong source input shape");
+    if (attr.fmt != RKNN_TENSOR_NHWC && attr.fmt != RKNN_TENSOR_NCHW)
+        throw std::runtime_error("unknown quantized RKNN input format");
+    const int lo = attr.type == RKNN_TENSOR_INT8 ? -128 : 0;
+    const int hi = attr.type == RKNN_TENSOR_INT8 ? 127 : 255;
+    std::vector<uint8_t> bytes(src.size());
+    for (int ch = 0; ch < c.ci; ++ch)
+        for (int y = 0; y < c.h; ++y)
+            for (int x = 0; x < c.w; ++x) {
+                const size_t srcIndex = (size_t(ch) * c.h + y) * c.w + x;
+                const size_t dstIndex = attr.fmt == RKNN_TENSOR_NHWC
+                    ? (size_t(y) * c.w + x) * c.ci + ch : srcIndex;
+                int q = int(std::lround(src[srcIndex] / attr.scale)) + attr.zp;
+                q = std::max(lo, std::min(hi, q));
+                bytes[dstIndex] = static_cast<uint8_t>(q);
+            }
+    return bytes;
+}
 struct Samples { std::vector<float> values; };
-static Samples inference(rknn_context context, const rknn_tensor_attr& outputAttr,
-                         const Case& c, std::vector<float>& inputBuffer,
-                         bool saveSamples) {
+static Samples inference(rknn_context context, const rknn_tensor_attr& inputAttr,
+                         const rknn_tensor_attr& outputAttr, const Case& c,
+                         const std::vector<uint8_t>& inputBytes, bool saveSamples) {
     rknn_input input{};
     input.index = 0;
-    input.buf = inputBuffer.data();
-    input.size = uint32_t(inputBuffer.size() * sizeof(float));
-    input.type = RKNN_TENSOR_FLOAT32;
-    input.fmt = RKNN_TENSOR_NCHW;
-    input.pass_through = 0;  // SDK converts host FP32 to calibrated NPU INT8.
+    input.buf = const_cast<uint8_t*>(inputBytes.data());
+    input.size = uint32_t(inputBytes.size());
+    input.type = inputAttr.type;
+    input.fmt = inputAttr.fmt;
+    input.pass_through = 0;  // matched INT8/UINT8 model format, no host conversion.
     check(rknn_inputs_set(context, 1, &input), "rknn_inputs_set");
     check(rknn_run(context, nullptr), "rknn_run");
     rknn_output output{};
@@ -110,9 +134,11 @@ static Samples inference(rknn_context context, const rknn_tensor_attr& outputAtt
     check(rknn_outputs_release(context, 1, &output), "rknn_outputs_release");
     return result;
 }
-static void verify(const Case& c, rknn_context ctx, const rknn_tensor_attr& attr,
-                   std::vector<float>& input) {
-    const auto first = inference(ctx, attr, c, input, true).values;
+static void verify(const Case& c, rknn_context ctx,
+                   const rknn_tensor_attr& inputAttr, const rknn_tensor_attr& outputAttr,
+                   const std::vector<float>& input,
+                   const std::vector<uint8_t>& packedInput) {
+    const auto first = inference(ctx, inputAttr, outputAttr, c, packedInput, true).values;
     if (first.size() != 75) throw std::runtime_error("verification missing 75 samples");
     const int ys[] = {0, 1, c.h/2, c.h-2, c.h-1};
     const int xs[] = {0, 1, c.w/2, c.w-2, c.w-1};
@@ -135,14 +161,35 @@ static void verify(const Case& c, rknn_context ctx, const rknn_tensor_attr& attr
     if (high - low < 0.01)
         throw std::runtime_error("RKNN sample outputs nearly constant");
     auto changedInput = makeInput(c, 1);
-    auto second = inference(ctx, attr, c, changedInput, true).values;
-    double sumDiff = 0;
-    for (size_t j = 0; j < first.size(); ++j) sumDiff += std::abs(first[j] - second[j]);
-    if (sumDiff / first.size() < .005)
-        throw std::runtime_error("RKNN output does not respond to changed input");
+    const auto changedPacked = packInput(c, inputAttr, changedInput);
+    size_t changedBytes = 0;
+    for (size_t n = 0; n < packedInput.size(); ++n)
+        if (packedInput[n] != changedPacked[n]) ++changedBytes;
+    if (changedBytes == 0) throw std::runtime_error("both test inputs quantize to identical values");
+    const auto second = inference(ctx, inputAttr, outputAttr, c, changedPacked, true).values;
+    double sumDiff = 0, expectedDiff = 0;
+    size_t sample = 0;
+    for (int y : ys) for (int x : xs) for (int oc : ch) {
+        const double refA = reference(c, input, y, x, oc);
+        const double refB = reference(c, changedInput, y, x, oc);
+        expectedDiff += std::abs(refB - refA);
+        sumDiff += std::abs(first[sample] - second[sample]);
+        ++sample;
+    }
+    const double response = sumDiff / first.size();
+    const double referenceResponse = expectedDiff / first.size();
+    std::printf("RK_INT8_RESPONSE_DIAG case=%s changed_input_bytes=%zu/%zu "
+                "reference_mean_delta=%.5f npu_mean_delta=%.5f "
+                "output_scale=%.6f first0=%.5f second0=%.5f\n",
+                c.name, changedBytes, packedInput.size(), referenceResponse,
+                response, outputAttr.scale, first[0], second[0]);
+    std::fflush(stdout);
+    if (referenceResponse > .04 && response < std::max(.005, double(outputAttr.scale) * .5))
+        throw std::runtime_error(
+            "RKNN output stayed unchanged despite clearly different quantized inputs");
     std::printf("RK_INT8_VERIFY_PASS case=%s samples=%zu max_abs_error=%.4f "
                 "mean_input_response=%.4f\n",
-                c.name, first.size(), maxError, sumDiff / first.size());
+                c.name, first.size(), maxError, response);
 }
 static void benchmark(const char* modelPath, const Case& c,
                       const std::string& core, int warmup, int runs, int seconds) {
@@ -189,11 +236,15 @@ static void benchmark(const char* modelPath, const Case& c,
         throw std::runtime_error("RKNN model tensor shape does not match requested profile");
     const double ops = 2.0 * c.h * c.w * c.ci * c.co * 3 * 3;
     auto input = makeInput(c, 0);
-    verify(c, context.handle, out, input);
+    const auto packedInput = packInput(c, in, input);
+    std::printf("RK_INT8_INPUT_PACKING source=NCHW_FP32 packed=%s_%s bytes=%zu\n",
+                in.fmt == RKNN_TENSOR_NHWC ? "NHWC" : "NCHW",
+                in.type == RKNN_TENSOR_INT8 ? "INT8" : "UINT8", packedInput.size());
+    verify(c, context.handle, in, out, input, packedInput);
     std::printf("RK_INT8_START core=%s case=%s ops=%.3fG warmup=%d runs=%d seconds=%d\n",
                 core.c_str(),c.name,ops/1e9,warmup,runs,seconds);
     std::fflush(stdout);
-    for (int i=0;i<warmup;i++) inference(context.handle,out,c,input,false);
+    for (int i=0;i<warmup;i++) inference(context.handle,in,out,c,packedInput,false);
     std::vector<double> timings;
     timings.reserve(seconds ? 50000 : size_t(runs));
     const auto start=Clock::now();
@@ -216,7 +267,7 @@ static void benchmark(const char* modelPath, const Case& c,
     };
     do {
         const auto t0=Clock::now();
-        inference(context.handle,out,c,input,false);
+        inference(context.handle,in,out,c,packedInput,false);
         const auto t1=Clock::now();
         timings.push_back(std::chrono::duration<double,std::milli>(t1-t0).count());
         ++windowCount;
