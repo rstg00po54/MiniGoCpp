@@ -324,8 +324,10 @@ Result runInt8Variant(Neuron& n, const NeuronDevice* device, const Case& c,
     checked(n.modelCreate(&h.model), "INT8 create model");
     checked(n.addOperand(h.model, &inType), "INT8 add input");
     checked(n.addOperand(h.model, &filterType), "INT8 add filter");
+    // Keep the scale buffer alive until compilation finishes: vendor APIs
+    // may defer copying tensor metadata.
+    std::vector<float> scales(c.co, filterScale);
     if (perChannel) {
-        std::vector<float> scales(c.co, filterScale);
         const NeuronSymmPerChannelQuantParams params = {0, c.co, scales.data()};
         checked(n.setPerChannelQuant(h.model, 1, &params), "INT8 per-channel filter scales");
     }
