@@ -61,4 +61,8 @@ run_test unknown unknown '' ERROR
 run_test rk_reject_mtk rk '' ERROR all mtk-mdla
 run_test rk_reject_shape rk '' ERROR large
 run_test vivo_reject_rk vivo '' ERROR all rk
+run_test vivo_signed_int8 vivo '' 'precision=int8' all mtk-mdla int8
+run_test vivo_int8_dsp vivo '' 'precision=int8' go19 mtk-dsp int8
+run_test rk_reject_int8 rk '' ERROR all auto int8
+run_test vivo_invalid_precision vivo '' ERROR all mtk-mdla fp8
 echo 'All TOPS autodetection tests PASS'
