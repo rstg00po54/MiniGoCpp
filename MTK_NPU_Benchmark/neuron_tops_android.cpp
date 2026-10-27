@@ -1,6 +1,6 @@
-// Standalone FP16 CONV_2D throughput probe for MediaTek Neuron Adapter.
-// Device-constrained: no NNAPI/CPU fallback. Measures *effective* model ops,
-// NOT silicon peak TOPS, and NOT INT8 TOPS.
+// Native FP16 and signed INT8 CONV_2D benchmarks for MediaTek Neuron Adapter.
+// Device-pinned: no selected-CPU fallback. Measures effective model-equivalent
+// throughput, never the silicon peak TOPS or internal hardware counters.
 #include <dlfcn.h>
 #include <algorithm>
 #include <chrono>
