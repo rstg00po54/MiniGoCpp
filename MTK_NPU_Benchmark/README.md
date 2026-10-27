@@ -99,8 +99,7 @@ effective_TOPS = nominal_ops / (latency_ms × 10^9)
 编译器和设备驱动影响。即使显式绑定 `mtk-mdla`，仍无法从该 API
 完全观察厂商内部调度方式。
 
-目前仅验证了源代码写入仓库，**尚未在实体设备上运行这套新自动检测脚本及 vivo TOPS 测试**；
-必须以终端打印的 `VERIFY_PASS` 和 `TOPS_PASS` 为准。
+既有的 FP16、heavy INT8 已在实体 vivo X300 Pro 上运行通过；新增的大负载和持续测试仍需要设备验证。
 
 ## vivo 适配库加载失败的诊断
 
@@ -152,8 +151,7 @@ INT8 模型采用 **有符号 8 位非对称量化输入/输出**（zero point=0
 不存在，也不能认定 `mtk-mdla` 测速涵盖整套 NPU 990 的计算单元。
 将对 `mtk-dsp` 的测试单独标注，**不要把 DSP 和 MDLA 的各自峰值相加**，
 也不要拿 FP16 与 INT8 的 TOPS 直接对照。
-这套新增 INT8 路径仍需要在实体 vivo 手机上验证：目前只有代码提交，
-无法保证每种张量规模和量化格式都能在这台手机的 MDLA 上编译通过。
+INT8 的 go19 和 heavy 已由实体 vivo 测通，但新增超大形状尚未验证，可能遇到编译器或内存限制。
 
 
 ## 扩展 INT8 大负载和持续 30 秒测试
@@ -167,37 +165,37 @@ INT8 模型采用 **有符号 8 位非对称量化输入/输出**（zero point=0
 | x256 | 256×256×256→256 | 77.309 | 高空间分辨率 |
 | x256c512 | 256×256×512→512 | 309.238 | 最大压力，可能因 NPU 内存/编译限制失败 |
 
-为避免意外高负载，默认 \`all\` **仍然只跑原来的四个小测试**；\`scale\`
+为避免意外高负载，默认 `all` **仍然只跑原来的四个小测试**；`scale`
 明确选择上表的四组，并逐个完成、释放前一个 Neuron 上下文再开始下一组。
 建议先用少量次数测尺寸兼容性，然后再选成功的档位做持续压力。
 
-\`\`\`bash
+```bash
 git pull
 WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh scale mtk-mdla int8
 WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x128 mtk-mdla int8
 WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x128c512 mtk-mdla int8
 WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x256 mtk-mdla int8
 WARMUP=100 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh x256c512 mtk-mdla int8
-\`\`\`
+```
 
 **单个负载持续跑 30 秒：**
 
-\`\`\`bash
+```bash
 WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh heavy mtk-mdla int8
 WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh x128 mtk-mdla int8
-\`\`\`
+```
 
-当 \`BENCH_SECONDS\` 大于 0 时，程序在预热/模型数值验证后按真实单调时钟计时，
-运行到指定秒数，忽略 \`RUNS\` 的固定次数（可设为 1～10000，默认 100）。
-最高允许 180 秒，防止误操作无限压力；\`NEURON_TIMEOUT\` 可调节 ADB 外部超时。
-不支持在 RK3588 的旧 RKNN NN/s 模式里使用 \`BENCH_SECONDS\`。
+当 `BENCH_SECONDS` 大于 0 时，程序在预热/模型数值验证后按真实单调时钟计时，
+运行到指定秒数，忽略 `RUNS` 的固定次数（可设为 1～10000，默认 100）。
+最高允许 180 秒，防止误操作无限压力；`NEURON_TIMEOUT` 可调节 ADB 外部超时。
+不支持在 RK3588 的旧 RKNN NN/s 模式里使用 `BENCH_SECONDS`。
 
-日志中的 \`SUSTAIN_WINDOW\` 每约 5 秒输出窗口内总推理次数、
-平均延迟、有效 TOPS，以及可选的温度 \`temp\`；只读取设备公开可访问并
+日志中的 `SUSTAIN_WINDOW` 每约 5 秒输出窗口内总推理次数、
+平均延迟、有效 TOPS，以及可选的温度 `temp`；只读取设备公开可访问并
 明确标为 NPU/APU/MDLA 的 sysfs thermal zone。
-如果 Android 不允许访问对应传感器，显示 \`temp=unavailable\`，**不代表芯片没有温度，也不使用 CPU 温度冒充 NPU**。
-\`SUSTAIN_SUMMARY\` 包含整体墙钟吞吐量、
-第一个和最后一个窗口的 TOPS 及 \`last_over_first\` 比例，便于估算降频。
+如果 Android 不允许访问对应传感器，显示 `temp=unavailable`，**不代表芯片没有温度，也不使用 CPU 温度冒充 NPU**。
+`SUSTAIN_SUMMARY` 包含整体墙钟吞吐量、
+第一个和最后一个窗口的 TOPS 及 `last_over_first` 比例，便于估算降频。
 不同尺寸是否能执行仍取决于 Neuron 编译器与设备内存，不保证全部可用。
 
 这些成绩依旧属于**指定 mtk-mdla 的 INT8 卷积工作负载有效吞吐量**，
