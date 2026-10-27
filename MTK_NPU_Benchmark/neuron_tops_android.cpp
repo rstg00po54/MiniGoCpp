@@ -81,13 +81,32 @@ struct Neuron {
     void (*freeExecution)(E*);
 
     Neuron() {
-        const char* libs[] = {"libneuronusdk_adapter.9.mtk.so",
-                              "libneuronusdk_adapter.mtk.so"};
+        // Match the library order used by the working KataGo Neuron runner.
+        // Keep the actual dlerror() details: a missing dependency or Android
+        // linker namespace rejection is not the same as a missing .so.
+        const char* libs[] = {
+            "libneuronusdk_adapter.9.mtk.so",
+            "libneuronusdk_adapter.mtk.so",
+            "/system_ext/lib64/libneuronusdk_adapter.9.mtk.so",
+            "/system_ext/lib64/libneuronusdk_adapter.mtk.so"
+        };
+        std::string failures;
         for (const char* name : libs) {
+            dlerror();
             lib = dlopen(name, RTLD_NOW | RTLD_LOCAL);
-            if (lib) { std::printf("Adapter library: %s\n", name); break; }
+            if (lib) {
+                std::printf("Adapter library: %s\n", name);
+                break;
+            }
+            const char* err = dlerror();
+            failures += std::string("\n  ") + name + ": " +
+                        (err ? err : "unknown Android linker error");
         }
-        if (!lib) throw std::runtime_error("MediaTek Neuron Adapter unavailable (check LD_LIBRARY_PATH)");
+        if (!lib) {
+            throw std::runtime_error(
+                "MediaTek Neuron Adapter dlopen failed:" + failures +
+                "\nCheck the library/dependency paths and Android linker namespace.");
+        }
         try {
             getVersion = symbol<decltype(getVersion)>(lib, "Neuron_getVersion");
             getDeviceCount = symbol<decltype(getDeviceCount)>(lib, "Neuron_getDeviceCount");
