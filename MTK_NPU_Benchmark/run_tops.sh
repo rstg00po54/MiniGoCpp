@@ -13,7 +13,7 @@ RUNS="${RUNS:-100}"
 BENCH_SECONDS="${BENCH_SECONDS:-0}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-case "$PROFILE" in all|scale|go19|small|medium|large|heavy|x128|x128c512|x256|x256c512) ;; *)
+case "$PROFILE" in all|scale|go19|rk64|small|medium|large|heavy|x128|x128c512|x256|x256c512) ;; *)
     die "profile must be all/scale/go19/small/medium/large/heavy/x128/x128c512/x256/x256c512" ;;
 esac
 case "$DEVICE" in auto|mtk-mdla|mtk-dsp|rk) ;; *)
@@ -57,10 +57,18 @@ echo "Selected ADB: $SERIAL"
 echo "Detected backend: $BACKEND (${INFO//$'\n'/ | })"
 
 if [ "$BACKEND" = rk ]; then
-    [ "$BENCH_SECONDS" = 0 ] || die "Timed INT8/FP16 stress profiles are available for vivo/Neuron only; RKNN currently reports NN/s"
     if [ "$PRECISION" = int8 ]; then
-        die "RK3588 INT8 TOPS kernel is not implemented; the existing RKNN KataGo test reports NN/s only. Use default fp16-compatible entry or a vivo device for INT8 TOPS."
+        case "$PROFILE" in rk64|heavy|x128|x256|x128c512|x256c512) ;; *)
+            die "For RK3588 INT8 choose rk64/heavy/x128/x256/x128c512/x256c512 (e.g. x128 auto int8)" ;;
+        esac
+        echo "RK3588 -> native RKNN INT8 calibrated convolution benchmark"
+        echo "RK3588 nominal total NPU peak is 6 TOPS INT8; reported results are measured model-equivalent throughput."
+        if [ "${TOPS_DRY_RUN:-0}" = 1 ]; then exit 0; fi
+        ADB="$ADB" ADB_SERIAL="$SERIAL" WARMUP="$WARMUP" RUNS="$RUNS" BENCH_SECONDS="$BENCH_SECONDS" \
+            bash "$ROOT/tools/bench_rk3588_tops.sh" "$PROFILE"
+        exit 0
     fi
+    [ "$BENCH_SECONDS" = 0 ] || die "Timed stress available for Neuron or RK3588 INT8 only; old RKNN KataGo NN/s mode has no timer"
     case "$PROFILE" in all|go19) ;; *)
         die "RK3588 currently supports only profile all/go19 (KataGo 10b 19x19 RKNN NN benchmark), not $PROFILE. RKNN result is NN/s, not TOPS." ;;
     esac
@@ -73,6 +81,8 @@ if [ "$BACKEND" = rk ]; then
     ADB="$ADB" ADB_SERIAL="$SERIAL" WARMUP="$WARMUP" RUNS="$RUNS"         CORE_MODES="${CORE_MODES:-0 1 2 all}"         bash "$ROOT/tools/bench_rk3588_npu.sh" 2>&1 | tee "$LOG"
     exit 0
 fi
+
+if [ "$PROFILE" = rk64 ]; then die "rk64 is a Rockchip-only INT8 profile; choose go19 for vivo"; fi
 
 # Neuron Adapter benchmark for vivo. Default device must not be RKNN on vivo.
 if [ "$DEVICE" = auto ]; then DEVICE="mtk-mdla"; fi
