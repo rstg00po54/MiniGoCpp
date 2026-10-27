@@ -154,3 +154,51 @@ INT8 模型采用 **有符号 8 位非对称量化输入/输出**（zero point=0
 也不要拿 FP16 与 INT8 的 TOPS 直接对照。
 这套新增 INT8 路径仍需要在实体 vivo 手机上验证：目前只有代码提交，
 无法保证每种张量规模和量化格式都能在这台手机的 MDLA 上编译通过。
+
+
+## 扩展 INT8 大负载和持续 30 秒测试
+
+支持的新大尺寸（全部采用 NHWC、3×3、stride=1、padding=1，权重优先 INT8 per-channel）：
+
+| profile | H×W×Cin→Cout | 标称 GOP/次 | 用途 |
+| --- | --- | ---: | --- |
+| x128 | 128×128×256→256 | 19.327 | 从之前 heavy 逐级放大 |
+| x128c512 | 128×128×512→512 | 77.309 | 高通道量 |
+| x256 | 256×256×256→256 | 77.309 | 高空间分辨率 |
+| x256c512 | 256×256×512→512 | 309.238 | 最大压力，可能因 NPU 内存/编译限制失败 |
+
+为避免意外高负载，默认 \`all\` **仍然只跑原来的四个小测试**；\`scale\`
+明确选择上表的四组，并逐个完成、释放前一个 Neuron 上下文再开始下一组。
+建议先用少量次数测尺寸兼容性，然后再选成功的档位做持续压力。
+
+\`\`\`bash
+git pull
+WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh scale mtk-mdla int8
+WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x128 mtk-mdla int8
+WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x128c512 mtk-mdla int8
+WARMUP=100 RUNS=300 bash MTK_NPU_Benchmark/run_tops.sh x256 mtk-mdla int8
+WARMUP=100 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh x256c512 mtk-mdla int8
+\`\`\`
+
+**单个负载持续跑 30 秒：**
+
+\`\`\`bash
+WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh heavy mtk-mdla int8
+WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh x128 mtk-mdla int8
+\`\`\`
+
+当 \`BENCH_SECONDS\` 大于 0 时，程序在预热/模型数值验证后按真实单调时钟计时，
+运行到指定秒数，忽略 \`RUNS\` 的固定次数（可设为 1～10000，默认 100）。
+最高允许 180 秒，防止误操作无限压力；\`NEURON_TIMEOUT\` 可调节 ADB 外部超时。
+不支持在 RK3588 的旧 RKNN NN/s 模式里使用 \`BENCH_SECONDS\`。
+
+日志中的 \`SUSTAIN_WINDOW\` 每约 5 秒输出窗口内总推理次数、
+平均延迟、有效 TOPS，以及可选的温度 \`temp\`；只读取设备公开可访问并
+明确标为 NPU/APU/MDLA 的 sysfs thermal zone。
+如果 Android 不允许访问对应传感器，显示 \`temp=unavailable\`，**不代表芯片没有温度，也不使用 CPU 温度冒充 NPU**。
+\`SUSTAIN_SUMMARY\` 包含整体墙钟吞吐量、
+第一个和最后一个窗口的 TOPS 及 \`last_over_first\` 比例，便于估算降频。
+不同尺寸是否能执行仍取决于 Neuron 编译器与设备内存，不保证全部可用。
+
+这些成绩依旧属于**指定 mtk-mdla 的 INT8 卷积工作负载有效吞吐量**，
+不可直接推断 NPU 990 的理论 TOPS，也没有证明覆盖 CIM 等其他硬件单元。
