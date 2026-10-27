@@ -10,10 +10,11 @@ DEVICE="${2:-auto}"
 PRECISION="${3:-fp16}"
 WARMUP="${WARMUP:-20}"
 RUNS="${RUNS:-100}"
+BENCH_SECONDS="${BENCH_SECONDS:-0}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-case "$PROFILE" in all|go19|small|medium|large|heavy) ;; *)
-    die "profile must be all/go19/small/medium/large/heavy" ;;
+case "$PROFILE" in all|scale|go19|small|medium|large|heavy|x128|x128c512|x256|x256c512) ;; *)
+    die "profile must be all/scale/go19/small/medium/large/heavy/x128/x128c512/x256/x256c512" ;;
 esac
 case "$DEVICE" in auto|mtk-mdla|mtk-dsp|rk) ;; *)
     die "device argument must be auto/mtk-mdla/mtk-dsp/rk" ;;
@@ -21,9 +22,9 @@ esac
 case "$PRECISION" in fp16|int8) ;; *)
     die "precision must be fp16 or int8" ;;
 esac
-[[ "$WARMUP" =~ ^[0-9]+$ && "$RUNS" =~ ^[0-9]+$ ]] || die "RUNS/WARMUP must be integers"
-(( ${#WARMUP} <= 5 && ${#RUNS} <= 5 )) || die "RUNS/WARMUP out of range"
-(( 10#$WARMUP <= 10000 && 10#$RUNS >= 1 && 10#$RUNS <= 10000 )) || die "RUNS must be 1..10000 and WARMUP 0..10000"
+[[ "$WARMUP" =~ ^[0-9]+$ && "$RUNS" =~ ^[0-9]+$ && "$BENCH_SECONDS" =~ ^[0-9]+$ ]] || die "RUNS/WARMUP/BENCH_SECONDS must be integers"
+(( ${#WARMUP} <= 5 && ${#RUNS} <= 5 && ${#BENCH_SECONDS} <= 3 )) || die "RUNS/WARMUP/BENCH_SECONDS out of range"
+(( 10#$WARMUP <= 10000 && 10#$RUNS >= 1 && 10#$RUNS <= 10000 && 10#$BENCH_SECONDS <= 180 )) || die "RUNS must be 1..10000, WARMUP 0..10000 and BENCH_SECONDS 0..180"
 
 # The existing selector already handles ADB_SERIAL and rejects ambiguous devices.
 SERIAL="$(ADB="$ADB" bash "$ROOT/tools/select_adb_device.sh" auto)"
@@ -56,6 +57,7 @@ echo "Selected ADB: $SERIAL"
 echo "Detected backend: $BACKEND (${INFO//$'\n'/ | })"
 
 if [ "$BACKEND" = rk ]; then
+    [ "$BENCH_SECONDS" = 0 ] || die "Timed INT8/FP16 stress profiles are available for vivo/Neuron only; RKNN currently reports NN/s"
     if [ "$PRECISION" = int8 ]; then
         die "RK3588 INT8 TOPS kernel is not implemented; the existing RKNN KataGo test reports NN/s only. Use default fp16-compatible entry or a vivo device for INT8 TOPS."
     fi
@@ -74,8 +76,8 @@ fi
 
 # Neuron Adapter benchmark for vivo. Default device must not be RKNN on vivo.
 if [ "$DEVICE" = auto ]; then DEVICE="mtk-mdla"; fi
-LOG="$HERE/results/$(date +%Y%m%d_%H%M%S)_${PROFILE}_${DEVICE}_${PRECISION}.log"
-echo "vivo -> Neuron Adapter: $DEVICE precision=$PRECISION profile=$PROFILE warmup=$WARMUP runs=$RUNS"
+LOG="$HERE/results/$(date +%Y%m%d_%H%M%S)_${PROFILE}_${DEVICE}_${PRECISION}_${BENCH_SECONDS}s.log"
+echo "vivo -> Neuron Adapter: $DEVICE precision=$PRECISION profile=$PROFILE warmup=$WARMUP runs=$RUNS bench_seconds=$BENCH_SECONDS"
 echo "Report: $LOG"
 if [ "${TOPS_DRY_RUN:-0}" = 1 ]; then exit 0; fi
 
@@ -90,7 +92,7 @@ CXX="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-
 mkdir -p "$HERE/build"
 BIN="$HERE/build/neuron_tops_android"
 if [ ! -x "$BIN" ] || [ "$HERE/neuron_tops_android.cpp" -nt "$BIN" ]; then
-    echo "Compiling MediaTek Neuron FP16 TOPS test for Android ARM64..."
+    echo "Compiling MediaTek Neuron FP16/INT8 TOPS test for Android ARM64..."
     "$CXX" -std=c++17 -O2 -fPIE -pie "$HERE/neuron_tops_android.cpp" -ldl -o "$BIN"
 fi
 
@@ -106,9 +108,9 @@ fi
 # Use the same Neuron loader search paths as the previously working
 # tools/bench_mediatek_katago_full.sh. Avoid shadowing system_ext dependencies
 # with vendor libraries that happen to have the same sonames.
-CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS $PRECISION"
+CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS $PRECISION $BENCH_SECONDS"
 if command -v timeout >/dev/null 2>&1; then
-    timeout "${NEURON_TIMEOUT:-300}" "${ADB_ARGS[@]}" shell "$CMD" 2>&1 | tee "$LOG"
+    timeout "${NEURON_TIMEOUT:-600}" "${ADB_ARGS[@]}" shell "$CMD" 2>&1 | tee "$LOG"
 else
     "${ADB_ARGS[@]}" shell "$CMD" 2>&1 | tee "$LOG"
 fi
