@@ -65,4 +65,28 @@ run_test vivo_signed_int8 vivo '' 'precision=int8' all mtk-mdla int8
 run_test vivo_int8_dsp vivo '' 'precision=int8' go19 mtk-dsp int8
 run_test rk_reject_int8 rk '' ERROR all auto int8
 run_test vivo_invalid_precision vivo '' ERROR all mtk-mdla fp8
+run_test vivo_scale_int8 vivo '' 'precision=int8' scale mtk-mdla int8
+run_test vivo_x128_int8 vivo '' 'precision=int8' x128 mtk-mdla int8
+run_test vivo_x256c512_int8 vivo '' 'precision=int8' x256c512 mtk-mdla int8
+run_test rk_reject_scale rk '' ERROR scale
+if BENCH_SECONDS=30 MOCK_ADB_MODE=rk ADB="$TMP/adb" TOPS_DRY_RUN=1 \
+    bash "$ROOT/MTK_NPU_Benchmark/run_tops.sh" all auto fp16 >/dev/null 2>&1; then
+    echo "FAIL rk_reject_stress: RKNN cannot run timed Neuron benchmark"
+    exit 1
+fi
+echo "PASS rk_reject_stress"
+if BENCH_SECONDS=181 MOCK_ADB_MODE=vivo ADB="$TMP/adb" TOPS_DRY_RUN=1 \
+    bash "$ROOT/MTK_NPU_Benchmark/run_tops.sh" heavy mtk-mdla int8 >/dev/null 2>&1; then
+    echo "FAIL reject_unsafe_stress_duration"
+    exit 1
+fi
+echo "PASS reject_unsafe_stress_duration"
+if output="$(BENCH_SECONDS=30 MOCK_ADB_MODE=vivo ADB="$TMP/adb" TOPS_DRY_RUN=1 \
+    bash "$ROOT/MTK_NPU_Benchmark/run_tops.sh" heavy mtk-mdla int8 2>&1)"; then
+    [[ "$output" == *"bench_seconds=30"* ]] || { echo "FAIL vivo_30s: $output"; exit 1; }
+else
+    echo "FAIL vivo_30s"
+    exit 1
+fi
+echo "PASS vivo_30s"
 echo 'All TOPS autodetection tests PASS'
