@@ -63,7 +63,10 @@ run_test rk_reject_shape rk '' ERROR large
 run_test vivo_reject_rk vivo '' ERROR all rk
 run_test vivo_signed_int8 vivo '' 'precision=int8' all mtk-mdla int8
 run_test vivo_int8_dsp vivo '' 'precision=int8' go19 mtk-dsp int8
-run_test rk_reject_int8 rk '' ERROR all auto int8
+run_test rk_reject_missing_profile rk '' ERROR all auto int8
+run_test rk_int8_heavy rk '' 'RK3588 -> native RKNN INT8' heavy auto int8
+run_test rk_int8_x128 rk '' 'RK3588 -> native RKNN INT8' x128 auto int8
+run_test rk_int8_rk64 rk '' 'RK3588 -> native RKNN INT8' rk64 auto int8
 run_test vivo_invalid_precision vivo '' ERROR all mtk-mdla fp8
 run_test vivo_scale_int8 vivo '' 'precision=int8' scale mtk-mdla int8
 run_test vivo_x128_int8 vivo '' 'precision=int8' x128 mtk-mdla int8
@@ -75,6 +78,13 @@ if BENCH_SECONDS=30 MOCK_ADB_MODE=rk ADB="$TMP/adb" TOPS_DRY_RUN=1 \
     exit 1
 fi
 echo "PASS rk_reject_stress"
+if output="$(BENCH_SECONDS=30 MOCK_ADB_MODE=rk ADB="$TMP/adb" TOPS_DRY_RUN=1 \
+    bash "$ROOT/MTK_NPU_Benchmark/run_tops.sh" heavy auto int8 2>&1)"; then
+    [[ "$output" == *"RK3588 -> native RKNN INT8"* ]] || { echo "FAIL rk_int8_stress: $output"; exit 1; }
+else
+    echo "FAIL rk_int8_stress"; exit 1
+fi
+echo "PASS rk_int8_stress"
 if BENCH_SECONDS=181 MOCK_ADB_MODE=vivo ADB="$TMP/adb" TOPS_DRY_RUN=1 \
     bash "$ROOT/MTK_NPU_Benchmark/run_tops.sh" heavy mtk-mdla int8 >/dev/null 2>&1; then
     echo "FAIL reject_unsafe_stress_duration"
