@@ -200,3 +200,65 @@ WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh x128 mtk-mdla int
 
 这些成绩依旧属于**指定 mtk-mdla 的 INT8 卷积工作负载有效吞吐量**，
 不可直接推断 NPU 990 的理论 TOPS，也没有证明覆盖 CIM 等其他硬件单元。
+
+## RK3588 / RK3588S 原生 RKNN INT8 TOPS 测试
+
+不同于旧的 KataGo 10b RKNN **NN/s** 测试，以下是专门生成的、真正执行 INT8 量化的
+3×3 合成卷积。为使 `rknn_run` 可以在 Android 上执行，必须先在
+x86_64 Ubuntu 使用 **RKNN-Toolkit2** 把 ONNX 校准量化、编译成 `.rknn`。
+这是 Rockchip 工具链的限制，不需要安装到 Android 手机/开发板上。
+
+量化模型自动生成一次，缓存到 `~/.cache/minigocpp/rknn_android/tops_*.rknn`，
+再次运行不重新编译模型或下载已有运行库。
+Android 测速器是纯 **C++**（`tools/rk3588_tops_android.cpp`），通过 ADB 在
+`/data/local/tmp/minigocpp_rk_tops` 执行，无需 APK。
+仅模型离线转换由 `tools/build_rk3588_tops_model.py` 完成。
+
+```bash
+git pull
+CORE_MODES="0 1 2 all" WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh heavy auto int8
+CORE_MODES="0" WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh x128 auto int8
+CORE_MODES="0" WARMUP=100 BENCH_SECONDS=30 bash MTK_NPU_Benchmark/run_tops.sh x128 auto int8
+```
+
+目前 RKNN INT8 可选档位（单个 model，对应显式选择）：
+
+| profile | NHWC 等价尺寸 H×W×Cin→Cout | 标称 GOP/次 |
+| --- | --- | ---: |
+| rk64 | 64×64×128→128 | 1.208 |
+| heavy | 96×96×256→256 | 10.872 |
+| x128 | 128×128×256→256 | 19.327 |
+| x256 | 256×256×256→256 | 77.309 |
+| x128c512 | 128×128×512→512 | 77.309 |
+| x256c512 | 256×256×512→512 | 309.238 |
+
+建议第一次从 `rk64` 或 `heavy` 开始；最后两个可能消耗较多内存和转换时间。
+`CORE_MODES` 可设置为单核 `0` / `1` / `2`，或单一模型跨核的 `all`。
+这还不是三个独立模型绑定三个独立 NPU 核同时运行的总吞吐量。
+
+生成器需要当前 Python 环境安装 `numpy`、`onnx`、`rknn-toolkit2`
+（可复用已有的 RKNN 环境）。若当前环境不是 RKNN 环境，指定：
+
+```bash
+RKNN_PYTHON=/path/to/rknn-env/bin/python CORE_MODES="0" bash MTK_NPU_Benchmark/run_tops.sh rk64 auto int8
+```
+
+可以用已经量化好的外部 RKNN 模型跳过生成器，但其图的输入输出形状、
+权重必须和上述测试代码一致（否则数值验证拒绝）：
+
+```bash
+RKNN_TOPS_MODEL=/path/to/generated_tops_heavy_int8.rknn CORE_MODES="0" bash MTK_NPU_Benchmark/run_tops.sh heavy auto int8
+```
+
+测试程序会查询 SDK 输出张量的 INT8/UINT8 量化属性，拒绝非量化输入/输出，
+并在正式计时前比较 **75 个 CPU 卷积参考输出**、检查输出非恒定且对输入变化敏感。
+只有成功才打印 `RK_INT8_VERIFY_PASS` 和 `RK_INT8_TOPS_PASS`。
+结果基于每次卷积的密集理论 MAC×2 除以总推理耗时，
+**包含 host float32→量化输入转换和 RKNN 输出传输开销**，并非硬件内部计数。
+和 vivo Neuron 的 FP16/INT8 测试的输入输出传输方式不完全相同，
+因此不能将两者的有效 TOPS 直接当作同条件的芯片峰值比较。
+
+瑞芯微标称 RK3588 **6 TOPS @ INT8（三核总量）**，这不等于单核极限，
+也不意味着一个模型的 `all` 模式必然会比单核快。
+RKNN 新 INT8 图及 Android C++ 路径**目前尚未在实体 RK3588 上验证**，
+第一次请提供模型生成日志和 `RK_INT8_*` 输出；若编译失败不会报告假 TOPS。
