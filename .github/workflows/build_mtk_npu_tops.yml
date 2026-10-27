@@ -5,6 +5,8 @@ on:
     paths:
       - 'MTK_NPU_Benchmark/neuron_tops_android.cpp'
       - 'MTK_NPU_Benchmark/run_tops.sh'
+      - 'tools/test_npu_tops_autodetect.sh'
+      - 'tools/select_adb_device.sh'
       - '.github/workflows/build_mtk_npu_tops.yml'
   workflow_dispatch:
 
@@ -18,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: android-actions/setup-android@v3
+      - name: Verify backend autodetection with mocked ADB
+        run: |
+          bash -n MTK_NPU_Benchmark/run_tops.sh
+          bash -n tools/test_npu_tops_autodetect.sh
+          bash tools/test_npu_tops_autodetect.sh
       - name: Install Android NDK r27
         run: sdkmanager --install 'ndk;27.2.12479018'
       - name: Syntax check ADB runner and compile native ARM64 benchmark
