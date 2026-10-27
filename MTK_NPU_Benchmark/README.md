@@ -24,7 +24,7 @@ RUNS=1000 WARMUP=100 bash MTK_NPU_Benchmark/launch.sh residual mtk-mdla
 
 归档 `source.tar.xz` 的内容与先前提供的独立 ZIP 源文件相同，包含原始 `README.md`、`run.sh` 和 `neuron_bench.cpp`。
 
-## ADB 原生 FP16 TOPS 测试（无需 APK）
+## ADB 自动识别 NPU 后端（无需 APK）
 
 ```bash
 cd /mnt/hgfs/D/code/go/MiniGoCpp
@@ -32,15 +32,29 @@ git pull
 bash MTK_NPU_Benchmark/run_tops.sh
 ```
 
-脚本自动使用已有的 Android NDK r27 编译 C++ ARM64 命令行程序，ADB 推入
-`/data/local/tmp/minigocpp_tops/` 并执行；默认只绑定 `mtk-mdla`，
-不会在编译 NPU 图失败时退回 CPU。终端和
-`MTK_NPU_Benchmark/results/YYYYMMDD_HHMMSS_all_mtk-mdla.log` 都会显示结果。
+脚本通过 `tools/select_adb_device.sh auto` 选择设备，再读取 SoC/厂商属性：
+
+- **vivo / MediaTek**：保留原生 Neuron FP16 合成卷积测速，固定 `mtk-mdla`（可选 `mtk-dsp`）；
+  使用 NDK r27 编译后，ADB 推入 `/data/local/tmp/minigocpp_tops/` 执行，显示 **有效 FP16 TOPS**。
+- **RK3588 / RK3588S**：自动转到已有的 `tools/bench_rk3588_npu.sh`，运行真实
+  KataGo 10b（19×19）的 RKNN 全网络测试，打印不同 NPU 核的延迟和 **NN evals/s**。
+  这条路径不报告 TOPS，因为模型未包含经过严格核实的运算量计数，不能把 NN/s 冒充 TOPS。
+- **未识别芯片或同时连接多种设备**：显式失败，要求指定 `ADB_SERIAL`；
+  不会盲猜设备或回退 CPU。两个通道都复用原来 benchmark 的依赖/缓存。
+
+默认命令 `bash MTK_NPU_Benchmark/run_tops.sh` 两种设备均可使用；
+无参数时根据 ADB 连接自动切换。报告保存在 `MTK_NPU_Benchmark/results/`。
 
 ```bash
 # 选择一种形状；默认 all 依次运行 go19/small/medium/large
 WARMUP=50 RUNS=200 bash MTK_NPU_Benchmark/run_tops.sh all mtk-mdla
 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh heavy mtk-mdla
+
+# RK3588: 使用 RKNN 全网络 benchmark，显示 NN evals/s（不显示 TOPS）
+CORE_MODES="0 1 2 all" RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh
+
+# 多台 ADB 设备同时连接时，手动指定 RK3588 序列号
+ADB_SERIAL=8719e18a71a2a66c bash MTK_NPU_Benchmark/run_tops.sh
 
 # 多设备时指定手机，例如无线 ADB
 ADB_SERIAL=192.168.0.184:5555 bash MTK_NPU_Benchmark/run_tops.sh go19 mtk-mdla
@@ -55,7 +69,7 @@ bash MTK_NPU_Benchmark/run_tops.sh small mtk-dsp
 adb shell 'cd /data/local/tmp/minigocpp_tops && LD_LIBRARY_PATH=.:/system_ext/lib64:/vendor/lib64 ./neuron_tops_android all mtk-mdla 20 100'
 ```
 
-测试集使用原生 **FP16**、3×3 same-padded 卷积：
+以下仅描述 **vivo Neuron** 后端：测试集使用原生 **FP16**、3×3 same-padded 卷积：
 
 | profile | 输入 NHWC | 输出通道 |
 | --- | --- | --- |
@@ -85,5 +99,5 @@ effective_TOPS = nominal_ops / (latency_ms × 10^9)
 编译器和设备驱动影响。即使显式绑定 `mtk-mdla`，仍无法从该 API
 完全观察厂商内部调度方式。
 
-目前仅验证了源代码写入仓库，**尚未在实体手机上运行这套新 TOPS 测试**；
+目前仅验证了源代码写入仓库，**尚未在实体设备上运行这套新自动检测脚本及 vivo TOPS 测试**；
 必须以终端打印的 `VERIFY_PASS` 和 `TOPS_PASS` 为准。
