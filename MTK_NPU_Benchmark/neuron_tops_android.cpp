@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cctype>
+#include <fstream>
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
@@ -58,8 +60,103 @@ const Case cases[] = {
     {"small", 32, 32, 128, 128},
     {"medium", 64, 64, 128, 128},
     {"large", 64, 64, 256, 256},
-    {"heavy", 96, 96, 256, 256}
+    {"heavy", 96, 96, 256, 256},
+    {"x128", 128, 128, 256, 256},
+    {"x128c512", 128, 128, 512, 512},
+    {"x256", 256, 256, 256, 256},
+    {"x256c512", 256, 256, 512, 512}
 };
+
+
+std::string npuTemperature() {
+    // Read only explicitly labelled NPU/MDLA/APU zones. Some devices forbid sysfs access.
+    for (int i = 0; i < 128; ++i) {
+        const std::string root = "/sys/class/thermal/thermal_zone" + std::to_string(i);
+        std::ifstream type(root + "/type");
+        std::string label;
+        if (!type || !std::getline(type, label)) continue;
+        std::string lower = label;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower.find("npu") == std::string::npos &&
+            lower.find("apu") == std::string::npos &&
+            lower.find("mdla") == std::string::npos) continue;
+        std::ifstream temp(root + "/temp");
+        double v = 0;
+        if (temp >> v) {
+            if (v > 1000) v /= 1000;
+            if (v > -40 && v < 150) {
+                char result[160] = {};
+                std::snprintf(result, sizeof(result), "%.1fC(%s)", v, label.c_str());
+                return result;
+            }
+        }
+    }
+    return "unavailable";
+}
+struct Measurement {
+    double meanMs = 0, p50Ms = 0, p95Ms = 0, fastestMs = 0;
+    double elapsedSec = 0, firstWindowTops = 0, lastWindowTops = 0;
+    size_t count = 0;
+};
+template <typename Infer>
+Measurement measure(Infer infer, int warmup, int runs, int durationSec,
+                    double ops, const char* caseName, const char* precision) {
+    for (int i = 0; i < warmup; ++i) infer();
+    using Clock = std::chrono::steady_clock;
+    std::vector<double> times;
+    times.reserve(durationSec ? size_t(durationSec) * 1000 : size_t(runs));
+    const auto start = Clock::now();
+    auto windowStart = start;
+    size_t windowCount = 0, windowIndex = 0;
+    double firstWindow = 0, lastWindow = 0;
+    auto emit = [&](Clock::time_point end, bool final) {
+        const double secs = std::chrono::duration<double>(end - windowStart).count();
+        if (windowCount && secs > 0) {
+            const double tops = double(windowCount) * ops / (secs * 1e12);
+            if (windowIndex == 0) firstWindow = tops;
+            lastWindow = tops;
+            ++windowIndex;
+            std::printf("SUSTAIN_WINDOW case=%s precision=%s window=%zu elapsed_s=%.2f "
+                        "samples=%zu mean_ms=%.4f effective_TOPS=%.4f temp=%s final=%s\n",
+                        caseName, precision, windowIndex,
+                        std::chrono::duration<double>(end - start).count(),
+                        windowCount, 1000.0 * secs / windowCount, tops,
+                        npuTemperature().c_str(), final ? "yes" : "no");
+            std::fflush(stdout);
+        }
+        windowStart = end;
+        windowCount = 0;
+    };
+    do {
+        const auto begin = Clock::now();
+        infer();
+        const auto end = Clock::now();
+        times.push_back(std::chrono::duration<double, std::milli>(end - begin).count());
+        ++windowCount;
+        if (durationSec &&
+            std::chrono::duration<double>(end - windowStart).count() >= 5) emit(end, false);
+        if (!durationSec && times.size() >= size_t(runs)) break;
+        if (durationSec && std::chrono::duration<double>(end - start).count() >= durationSec) break;
+    } while (true);
+    const auto finish = Clock::now();
+    if (durationSec && windowCount) emit(finish, true);
+    const double elapsed = std::chrono::duration<double>(finish - start).count();
+    const size_t count = times.size();
+    const double mean = std::accumulate(times.begin(), times.end(), 0.0) / double(count);
+    std::sort(times.begin(), times.end());
+    const Measurement result{mean, percentile(times,.5), percentile(times,.95),
+                             times.front(), elapsed, firstWindow, lastWindow, count};
+    if (durationSec) {
+        std::printf("SUSTAIN_SUMMARY case=%s precision=%s requested_s=%d elapsed_s=%.3f "
+                    "samples=%zu mean_effective_TOPS=%.4f wall_effective_TOPS=%.4f "
+                    "first_window_TOPS=%.4f last_window_TOPS=%.4f last_over_first=%.3f\n",
+                    caseName, precision, durationSec, elapsed, count,
+                    ops / (mean * 1e9), ops * count / (elapsed * 1e12),
+                    firstWindow, lastWindow, firstWindow > 0 ? lastWindow / firstWindow : 0);
+    }
+    return result;
+}
 
 struct Neuron {
     void* lib = nullptr;
@@ -180,7 +277,7 @@ struct Handles {
 
 struct Result { double meanTops, fastestTops; };
 Result runCase(Neuron& n, const NeuronDevice* device, const Case& c,
-               int warmup, int runs) {
+               int warmup, int runs, int durationSec) {
     constexpr uint32_t K = 3;
     const uint32_t inputDims[4] = {1, c.h, c.w, c.ci};
     const uint32_t filterDims[4] = {c.co, K, K, c.ci};
@@ -270,27 +367,15 @@ Result runCase(Neuron& n, const NeuronDevice* device, const Case& c,
         ++checkedCount;
     }
     std::printf("VERIFY_PASS case=%s samples=%d max_abs_error=%.6f\n", c.name, checkedCount, maxError);
-    for (int i = 0; i < warmup; ++i) infer();
-    std::vector<double> times;
-    times.reserve(size_t(runs));
-    for (int i = 0; i < runs; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        infer();
-        times.push_back(std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - start).count());
-    }
-    const double meanMs = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
-    std::sort(times.begin(), times.end());
-    // Conventional dense CONV nominal operation count, includes zero padding.
-    // One MAC = 2 floating point operations. It is *not* actual hardware op telemetry.
     const double ops = 2.0 * c.h * c.w * c.co * K * K * c.ci;
-    const double meanTops = ops / (meanMs * 1.0e9);
-    const double fastestTops = ops / (times.front() * 1.0e9);
+    const Measurement m = measure(infer, warmup, runs, durationSec, ops, c.name, "fp16");
+    const double meanTops = ops / (m.meanMs * 1e9);
+    const double fastestTops = ops / (m.fastestMs * 1e9);
     std::printf("TOPS_PASS case=%s shape=1x%ux%ux%u->%u FP16 ops=%.3fG "
                 "mean=%.4fms p50=%.4fms p95=%.4fms fastest=%.4fms "
                 "TOPS_mean=%.4f TOPS_fastest=%.4f\n",
-                c.name, c.h, c.w, c.ci, c.co, ops / 1.0e9, meanMs,
-                percentile(times, .5), percentile(times, .95), times.front(),
+                c.name, c.h, c.w, c.ci, c.co, ops / 1.0e9, m.meanMs,
+                m.p50Ms, m.p95Ms, m.fastestMs,
                 meanTops, fastestTops);
     std::fflush(stdout);
     return {meanTops, fastestTops};
@@ -299,7 +384,7 @@ Result runCase(Neuron& n, const NeuronDevice* device, const Case& c,
 // A per-channel signed filter is attempted first; a per-tensor signed asymmetric
 // filter is the fallback. A model is NEVER run on an unselected CPU backend.
 Result runInt8Variant(Neuron& n, const NeuronDevice* device, const Case& c,
-                      int warmup, int runs, bool perChannel) {
+                      int warmup, int runs, bool perChannel, int durationSec) {
     constexpr uint32_t K = 3;
     constexpr float inputScale = 1.0f / 16.0f;
     constexpr float filterScale = 1.0f / 32.0f;
@@ -431,26 +516,16 @@ Result runInt8Variant(Neuron& n, const NeuronDevice* device, const Case& c,
                 c.name, perChannel ? "per_channel" : "per_tensor", checkedCount, maxDiff);
     std::fflush(stdout);
 
-    for (int i = 0; i < warmup; ++i) infer();
-    std::vector<double> times;
-    times.reserve(size_t(runs));
-    for (int i = 0; i < runs; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        infer();
-        times.push_back(std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - start).count());
-    }
-    const double meanMs = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
-    std::sort(times.begin(), times.end());
     const double nominalOps = 2.0 * c.h * c.w * c.co * K * K * c.ci;
-    const double meanTops = nominalOps / (meanMs * 1e9);
-    const double fastestTops = nominalOps / (times.front() * 1e9);
+    const Measurement m = measure(infer, warmup, runs, durationSec, nominalOps, c.name, "int8");
+    const double meanTops = nominalOps / (m.meanMs * 1e9);
+    const double fastestTops = nominalOps / (m.fastestMs * 1e9);
     std::printf("INT8_TOPS_PASS case=%s weights=%s shape=1x%ux%ux%u->%u "
                 "ops=%.3fG mean=%.4fms p50=%.4fms p95=%.4fms fastest=%.4fms "
                 "TOPS_mean=%.4f TOPS_fastest=%.4f\n",
                 c.name, perChannel ? "per_channel" : "per_tensor",
-                c.h, c.w, c.ci, c.co, nominalOps / 1e9, meanMs,
-                percentile(times, .5), percentile(times, .95), times.front(),
+                c.h, c.w, c.ci, c.co, nominalOps / 1e9, m.meanMs,
+                m.p50Ms, m.p95Ms, m.fastestMs,
                 meanTops, fastestTops);
     std::fflush(stdout);
     return {meanTops, fastestTops};
@@ -459,45 +534,52 @@ Result runInt8Variant(Neuron& n, const NeuronDevice* device, const Case& c,
 int main(int argc, char** argv) {
     try {
         // [profile] [mtk-mdla|mtk-dsp] [warmup] [runs] [fp16|int8]
-        if (argc > 6) throw std::runtime_error("Usage: neuron_tops_android [profile] [device] [warmup] [runs] [fp16|int8]");
+        if (argc > 7) throw std::runtime_error("Usage: neuron_tops_android [profile] [device] [warmup] [runs] [fp16|int8] [durationSec]");
         const std::string profile = argc > 1 ? argv[1] : "all";
         const std::string deviceName = argc > 2 ? argv[2] : "mtk-mdla";
         int warmup = argc > 3 ? std::stoi(argv[3]) : 20;
         int runs = argc > 4 ? std::stoi(argv[4]) : 100;
         const std::string precision = argc > 5 ? argv[5] : "fp16";
+        const int durationSec = argc > 6 ? std::stoi(argv[6]) : 0;
+        if (durationSec < 0 || durationSec > 180)
+            throw std::runtime_error("durationSec must be 0..180");
         if (precision != "fp16" && precision != "int8")
             throw std::runtime_error("precision must be fp16 or int8");
         if (deviceName != "mtk-mdla" && deviceName != "mtk-dsp")
             throw std::runtime_error("Device must be mtk-mdla or mtk-dsp");
         if (warmup < 0 || warmup > 10000 || runs < 1 || runs > 10000)
             throw std::runtime_error("Invalid warmup/runs (max 10000)");
-        bool validProfile = profile == "all";
+        bool validProfile = profile == "all" || profile == "scale";
         for (const auto& c : cases) validProfile |= profile == c.name;
-        if (!validProfile) throw std::runtime_error("Invalid profile; choose all/go19/small/medium/large/heavy");
+        if (!validProfile) throw std::runtime_error("Invalid profile; choose all/scale/go19/small/medium/large/heavy/x128/x128c512/x256/x256c512");
 
         Neuron n;
         const NeuronDevice* device = n.choose(deviceName);
-        std::printf("PINNED_DEVICE=%s precision=%s warmup=%d runs=%d\n",
-                    deviceName.c_str(), precision.c_str(), warmup, runs);
+        std::printf("PINNED_DEVICE=%s precision=%s warmup=%d runs=%d duration_s=%d\n",
+                    deviceName.c_str(), precision.c_str(), warmup, runs, durationSec);
         double maxMean = 0, maxFastest = 0;
         int success = 0, failures = 0;
         for (const auto& c : cases) {
-            if (profile == "all" && std::string(c.name) == "heavy") continue;
-            if (profile != "all" && profile != c.name) continue;
+            const std::string caseName(c.name);
+            const bool extra = caseName == "x128" || caseName == "x128c512" ||
+                               caseName == "x256" || caseName == "x256c512";
+            if (profile == "all" && (caseName == "heavy" || extra)) continue;
+            if (profile == "scale" && !extra) continue;
+            if (profile != "all" && profile != "scale" && profile != caseName) continue;
             std::printf("\nCASE_START %s\n", c.name);
             std::fflush(stdout);
             try {
                 Result r{};
                 if (precision == "fp16") {
-                    r = runCase(n, device, c, warmup, runs);
+                    r = runCase(n, device, c, warmup, runs, durationSec);
                 } else {
                     try {
                         std::puts("INT8 trying signed asymmetric activations with per-channel signed weights");
-                        r = runInt8Variant(n, device, c, warmup, runs, true);
+                        r = runInt8Variant(n, device, c, warmup, runs, true, durationSec);
                     } catch (const std::exception& firstError) {
                         std::fprintf(stderr, "INT8_PER_CHANNEL_FAIL case=%s reason=%s; trying per-tensor signed weights\n",
                                      c.name, firstError.what());
-                        r = runInt8Variant(n, device, c, warmup, runs, false);
+                        r = runInt8Variant(n, device, c, warmup, runs, false, durationSec);
                     }
                 }
                 maxMean = std::max(maxMean, r.meanTops);
