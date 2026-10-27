@@ -96,7 +96,10 @@ if [ -s "$CPP_LIB" ]; then
 fi
 "${ADB_ARGS[@]}" shell "chmod 755 $REMOTE/neuron_tops_android"
 
-CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64:/vendor/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS"
+# Use the same Neuron loader search paths as the previously working
+# tools/bench_mediatek_katago_full.sh. Avoid shadowing system_ext dependencies
+# with vendor libraries that happen to have the same sonames.
+CMD="cd $REMOTE && LD_LIBRARY_PATH=$REMOTE:/system_ext/lib64 ./neuron_tops_android $PROFILE $DEVICE $WARMUP $RUNS"
 if command -v timeout >/dev/null 2>&1; then
     timeout "${NEURON_TIMEOUT:-300}" "${ADB_ARGS[@]}" shell "$CMD" 2>&1 | tee "$LOG"
 else
