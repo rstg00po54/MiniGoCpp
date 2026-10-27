@@ -66,7 +66,7 @@ bash MTK_NPU_Benchmark/run_tops.sh small mtk-dsp
 也能绕开脚本、用 ADB 直接执行**已经编译并上传**的程序：
 
 ```bash
-adb shell 'cd /data/local/tmp/minigocpp_tops && LD_LIBRARY_PATH=.:/system_ext/lib64:/vendor/lib64 ./neuron_tops_android all mtk-mdla 20 100'
+adb shell 'cd /data/local/tmp/minigocpp_tops && LD_LIBRARY_PATH=.:/system_ext/lib64 ./neuron_tops_android all mtk-mdla 20 100'
 ```
 
 以下仅描述 **vivo Neuron** 后端：测试集使用原生 **FP16**、3×3 same-padded 卷积：
@@ -101,3 +101,12 @@ effective_TOPS = nominal_ops / (latency_ms × 10^9)
 
 目前仅验证了源代码写入仓库，**尚未在实体设备上运行这套新自动检测脚本及 vivo TOPS 测试**；
 必须以终端打印的 `VERIFY_PASS` 和 `TOPS_PASS` 为准。
+
+## vivo 适配库加载失败的诊断
+
+`TOPS_BENCH_FAIL: MediaTek Neuron Adapter dlopen failed` 表示图还没有提交到 NPU。
+`run_tops.sh` 现在使用与此前跑通的 `tools/bench_mediatek_katago_full.sh`
+相同的 `LD_LIBRARY_PATH=/data/local/tmp/minigocpp_tops:/system_ext/lib64`。
+错误文本中会逐项列出 `dlopen` 对各候选库的真实诊断（如
+`library not found`、依赖缺失、链接器命名空间拒绝）。失败时不要把成绩记作 0 TOPS。
+如果更新后仍出现失败，保留完整 `TOPS_BENCH_FAIL` 错误供定位；无需重新下载模型。
