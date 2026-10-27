@@ -1,0 +1,35 @@
+name: Build ADB MediaTek NPU TOPS benchmark
+
+on:
+  push:
+    paths:
+      - 'MTK_NPU_Benchmark/neuron_tops_android.cpp'
+      - 'MTK_NPU_Benchmark/run_tops.sh'
+      - '.github/workflows/build_mtk_npu_tops.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK r27
+        run: sdkmanager --install 'ndk;27.2.12479018'
+      - name: Syntax check ADB runner and compile native ARM64 benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n MTK_NPU_Benchmark/run_tops.sh
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++"
+          mkdir -p build/mtk_tops
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -fPIE -pie MTK_NPU_Benchmark/neuron_tops_android.cpp -ldl -o build/mtk_tops/neuron_tops_android
+          file build/mtk_tops/neuron_tops_android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mediatek-neuron-tops-android-arm64
+          path: build/mtk_tops/neuron_tops_android
