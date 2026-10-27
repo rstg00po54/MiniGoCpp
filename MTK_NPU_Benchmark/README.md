@@ -110,3 +110,47 @@ effective_TOPS = nominal_ops / (latency_ms × 10^9)
 错误文本中会逐项列出 `dlopen` 对各候选库的真实诊断（如
 `library not found`、依赖缺失、链接器命名空间拒绝）。失败时不要把成绩记作 0 TOPS。
 如果更新后仍出现失败，保留完整 `TOPS_BENCH_FAIL` 错误供定位；无需重新下载模型。
+
+## vivo NPU 真正的 signed INT8 吞吐量测试（新增）
+
+原来的 FP16 测试不变。要测试有符号 INT8，直接在命令尾部加 `int8`：
+
+```bash
+git pull
+WARMUP=30 RUNS=200 bash MTK_NPU_Benchmark/run_tops.sh all mtk-mdla int8
+WARMUP=100 RUNS=500 bash MTK_NPU_Benchmark/run_tops.sh heavy mtk-mdla int8
+```
+
+想比较已经枚举到的另一个 MediaTek Neuron 设备 `mtk-dsp`：
+
+```bash
+WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh go19 mtk-dsp int8
+```
+
+参数含义：`run_tops.sh [profile] [auto|mtk-mdla|mtk-dsp] [fp16|int8]`。
+默认仍是 `all auto fp16`；连接 vivo 时，`auto` 自动绑定 `mtk-mdla`。
+连接 RK3588 时保持原有 RKNN 整网测速，只报告 NN/s，**不提供 INT8 TOPS**；
+如果用户明确在 RK3588 上选择 `int8`，会报错，避免伪造可比较结果。
+
+INT8 模型采用 **有符号 8 位非对称量化输入/输出**（zero point=0），
+优先使用 **逐输出通道对称量化的有符号 INT8 卷积权重**；若该格式被驱动
+拒绝，再尝试逐张量 signed INT8 量化权重。偏置为 INT32，scale 等于
+输入与权重的 scale 乘积。每个 case 都使用真实变化的非零输入和权重，
+首先运行一次并对边界、中央以及多组输出通道共 75 个量化输出做 CPU
+整数卷积参考验证，容许至多 2 个输出量化刻度（LSB）的差异。
+只在设备专属编译、运行和数值检验成功后才打印
+`INT8_TOPS_PASS`，否则报告 `INT8_PER_CHANNEL_FAIL` /
+`TOPS_CASE_FAIL`。没有 CPU 计算回退；CPU 仅用于校验。
+
+`TOPS_mean` / `TOPS_fastest` 仍然是根据密集卷积标称运算数
+（每个 MAC 计 2 OPS）除以同步推理耗时的 **有效 INT8 TOPS**，
+不是厂商标称芯片峰值，也不是 APU/NPU 内部硬件计数器；
+驱动调度和编译器优化不可由该值直接还原。
+
+**关于 100 TOPS：** 当前手机通过 Neuron Adapter API 的设备枚举只观测到
+`mtk-dsp` 和 `mtk-mdla`，没有单独枚举到 CIM。不能因此断言 CIM
+不存在，也不能认定 `mtk-mdla` 测速涵盖整套 NPU 990 的计算单元。
+将对 `mtk-dsp` 的测试单独标注，**不要把 DSP 和 MDLA 的各自峰值相加**，
+也不要拿 FP16 与 INT8 的 TOPS 直接对照。
+这套新增 INT8 路径仍需要在实体 vivo 手机上验证：目前只有代码提交，
+无法保证每种张量规模和量化格式都能在这台手机的 MDLA 上编译通过。
