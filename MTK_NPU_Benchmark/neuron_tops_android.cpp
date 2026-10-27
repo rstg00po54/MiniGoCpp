@@ -25,8 +25,16 @@ struct NeuronOperandType {
     int32_t zeroPoint;
 };
 struct NeuronRuntimeVersion { uint8_t major, minor, patch; };
+struct NeuronSymmPerChannelQuantParams {
+    uint32_t channelDim;
+    uint32_t scaleCount;
+    const float* scales;
+};
 constexpr int32_t INT32_TYPE = 1;
 constexpr int32_t FP16_TYPE = 8;
+constexpr int32_t INT8_SIGNED_ASYMM = 14;
+constexpr int32_t INT8_SIGNED_PER_CHANNEL = 11;
+constexpr int32_t INT32_TENSOR = 4;
 constexpr int32_t CONV_2D = 3;
 constexpr int32_t NO_ERROR = 0;
 
@@ -67,6 +75,7 @@ struct Neuron {
     void (*modelFree)(M*);
     int (*addOperand)(M*, const NeuronOperandType*);
     int (*setValue)(M*, int32_t, const void*, size_t);
+    int (*setPerChannelQuant)(M*, int32_t, const NeuronSymmPerChannelQuantParams*) = nullptr;
     int (*addOperation)(M*, int32_t, uint32_t, const uint32_t*, uint32_t, const uint32_t*);
     int (*identifyIO)(M*, uint32_t, const uint32_t*, uint32_t, const uint32_t*);
     int (*finishModel)(M*);
@@ -116,6 +125,8 @@ struct Neuron {
             modelFree = symbol<decltype(modelFree)>(lib, "NeuronModel_free");
             addOperand = symbol<decltype(addOperand)>(lib, "NeuronModel_addOperand");
             setValue = symbol<decltype(setValue)>(lib, "NeuronModel_setOperandValue");
+            setPerChannelQuant = reinterpret_cast<decltype(setPerChannelQuant)>(
+                dlsym(lib, "NeuronModel_setOperandSymmPerChannelQuantParams"));
             addOperation = symbol<decltype(addOperation)>(lib, "NeuronModel_addOperation");
             identifyIO = symbol<decltype(identifyIO)>(lib, "NeuronModel_identifyInputsAndOutputs");
             finishModel = symbol<decltype(finishModel)>(lib, "NeuronModel_finish");
@@ -284,14 +295,176 @@ Result runCase(Neuron& n, const NeuronDevice* device, const Case& c,
     std::fflush(stdout);
     return {meanTops, fastestTops};
 }
+// Native signed INT8 asymmetric activations + symmetric signed INT8 weights.
+// A per-channel signed filter is attempted first; a per-tensor signed asymmetric
+// filter is the fallback. A model is NEVER run on an unselected CPU backend.
+Result runInt8Variant(Neuron& n, const NeuronDevice* device, const Case& c,
+                      int warmup, int runs, bool perChannel) {
+    constexpr uint32_t K = 3;
+    constexpr float inputScale = 1.0f / 16.0f;
+    constexpr float filterScale = 1.0f / 32.0f;
+    constexpr float outputScale = 1.0f / 8.0f;
+    constexpr float biasScale = inputScale * filterScale;
+    const uint32_t inputDims[4] = {1, c.h, c.w, c.ci};
+    const uint32_t filterDims[4] = {c.co, K, K, c.ci};
+    const uint32_t biasDims[1] = {c.co};
+    const uint32_t outputDims[4] = {1, c.h, c.w, c.co};
+    const NeuronOperandType inType = {INT8_SIGNED_ASYMM, 4, inputDims, inputScale, 0};
+    const NeuronOperandType filterType = {
+        perChannel ? INT8_SIGNED_PER_CHANNEL : INT8_SIGNED_ASYMM,
+        4, filterDims, perChannel ? 0.0f : filterScale, 0
+    };
+    const NeuronOperandType biasType = {INT32_TENSOR, 1, biasDims, biasScale, 0};
+    const NeuronOperandType outType = {INT8_SIGNED_ASYMM, 4, outputDims, outputScale, 0};
+    const NeuronOperandType scalar = {INT32_TYPE, 0, nullptr, 0, 0};
+    if (perChannel && !n.setPerChannelQuant)
+        throw std::runtime_error("NeuronModel_setOperandSymmPerChannelQuantParams absent");
+
+    Handles h(n);
+    checked(n.modelCreate(&h.model), "INT8 create model");
+    checked(n.addOperand(h.model, &inType), "INT8 add input");
+    checked(n.addOperand(h.model, &filterType), "INT8 add filter");
+    if (perChannel) {
+        std::vector<float> scales(c.co, filterScale);
+        const NeuronSymmPerChannelQuantParams params = {0, c.co, scales.data()};
+        checked(n.setPerChannelQuant(h.model, 1, &params), "INT8 per-channel filter scales");
+    }
+    checked(n.addOperand(h.model, &biasType), "INT8 add bias");
+    const int32_t scalars[7] = {1, 1, 1, 1, 1, 1, 0};
+    for (int i = 0; i < 7; ++i) {
+        checked(n.addOperand(h.model, &scalar), "INT8 scalar");
+        checked(n.setValue(h.model, 3 + i, &scalars[i], sizeof(int32_t)), "INT8 scalar value");
+    }
+    checked(n.addOperand(h.model, &outType), "INT8 output");
+
+    std::vector<int8_t> weights(size_t(c.co) * K * K * c.ci);
+    for (uint32_t oc = 0; oc < c.co; ++oc)
+        for (uint32_t ky = 0; ky < K; ++ky)
+            for (uint32_t kx = 0; kx < K; ++kx)
+                for (uint32_t ic = 0; ic < c.ci; ++ic) {
+                    size_t idx = ((size_t(oc) * K + ky) * K + kx) * c.ci + ic;
+                    weights[idx] = static_cast<int8_t>(
+                        int((oc * 13u + ic * 7u + ky * 11u + kx * 17u) % 15u) - 7);
+                }
+    std::vector<int32_t> bias(c.co);
+    for (uint32_t oc = 0; oc < c.co; ++oc)
+        bias[oc] = (int(oc % 7u) - 3) * 24;
+
+    checked(n.setValue(h.model, 1, weights.data(), weights.size()), "INT8 set weights");
+    checked(n.setValue(h.model, 2, bias.data(), bias.size() * sizeof(int32_t)), "INT8 set bias");
+    const uint32_t opInputs[10] = {0,1,2,3,4,5,6,7,8,9};
+    const uint32_t opOutputs[1] = {10};
+    const uint32_t inputs[1] = {0};
+    checked(n.addOperation(h.model, CONV_2D, 10, opInputs, 1, opOutputs), "INT8 CONV_2D");
+    checked(n.identifyIO(h.model, 1, inputs, 1, opOutputs), "INT8 IO");
+    checked(n.finishModel(h.model), "INT8 finish model");
+
+    const NeuronDevice* selected[] = {device};
+    bool supported = false;
+    checked(n.getSupported(h.model, selected, 1, &supported), "INT8 query supported ops");
+    std::printf("INT8_OP_SUPPORT case=%s weights=%s supported=%s\n",
+                c.name, perChannel ? "per_channel" : "per_tensor",
+                supported ? "yes" : "no");
+    std::fflush(stdout);
+    if (!supported) throw std::runtime_error("Selected device does not support this INT8 CONV_2D");
+    checked(n.compileForDevices(h.model, selected, 1, &h.compilation), "INT8 device-pinned compilation");
+    checked(n.finishCompilation(h.compilation), "INT8 compilation finish");
+    checked(n.createExecution(h.compilation, &h.execution), "INT8 execution create");
+
+    std::vector<int8_t> input(size_t(c.h) * c.w * c.ci);
+    std::vector<int8_t> output(size_t(c.h) * c.w * c.co, int8_t(-128));
+    for (uint32_t y = 0; y < c.h; ++y)
+        for (uint32_t x = 0; x < c.w; ++x)
+            for (uint32_t ic = 0; ic < c.ci; ++ic) {
+                const uint32_t mix = (y * 29u + x * 17u + ic * 11u) ^
+                                     (ic * 7u + y * 3u + x * 13u);
+                input[(size_t(y) * c.w + x) * c.ci + ic] =
+                    static_cast<int8_t>(int(mix % 63u) - 31);
+            }
+    checked(n.setInput(h.execution, 0, nullptr, input.data(), input.size()), "INT8 set input");
+    checked(n.setOutput(h.execution, 0, nullptr, output.data(), output.size()), "INT8 set output");
+
+    auto infer = [&]() { checked(n.compute(h.execution), "INT8 compute"); };
+    infer();
+
+    // Compute reference *integer* dot products, then requantize.
+    // Padding means zero in the quantized domain because all zero points are 0.
+    const uint32_t ys[] = {0, 1, c.h / 2, c.h - 2, c.h - 1};
+    const uint32_t xs[] = {0, 1, c.w / 2, c.w - 2, c.w - 1};
+    const uint32_t channels[] = {0, c.co / 2, c.co - 1};
+    int maxDiff = 0;
+    int checkedCount = 0;
+    bool varied = false;
+    int firstOutput = 0;
+    for (uint32_t y : ys) for (uint32_t x : xs) for (uint32_t oc : channels) {
+        int64_t acc = bias[oc];
+        for (int ky = 0; ky < 3; ++ky) for (int kx = 0; kx < 3; ++kx) {
+            int iy = int(y) + ky - 1;
+            int ix = int(x) + kx - 1;
+            if (iy < 0 || ix < 0 || iy >= int(c.h) || ix >= int(c.w)) continue;
+            for (uint32_t ic = 0; ic < c.ci; ++ic) {
+                size_t wi = ((size_t(oc) * K + uint32_t(ky)) * K + uint32_t(kx)) * c.ci + ic;
+                size_t ii = (size_t(iy) * c.w + size_t(ix)) * c.ci + ic;
+                acc += int(input[ii]) * int(weights[wi]);
+            }
+        }
+        const double value = double(acc) * (double(biasScale) / double(outputScale));
+        const long q = std::lround(value);
+        const int expected = int(std::max(-128L, std::min(127L, q)));
+        const int got = int(output[(size_t(y) * c.w + x) * c.co + oc]);
+        const int diff = std::abs(got - expected);
+        maxDiff = std::max(maxDiff, diff);
+        if (checkedCount == 0) firstOutput = got;
+        else if (got != firstOutput) varied = true;
+        if (diff > 2) {
+            throw std::runtime_error("INT8 output mismatch expected=" +
+                std::to_string(expected) + " got=" + std::to_string(got) +
+                " y=" + std::to_string(y) + " x=" + std::to_string(x) +
+                " oc=" + std::to_string(oc));
+        }
+        ++checkedCount;
+    }
+    if (!varied) throw std::runtime_error("INT8 outputs are constant; benchmark not credible");
+    std::printf("INT8_VERIFY_PASS case=%s weights=%s samples=%d max_quantized_LSB_error=%d\n",
+                c.name, perChannel ? "per_channel" : "per_tensor", checkedCount, maxDiff);
+    std::fflush(stdout);
+
+    for (int i = 0; i < warmup; ++i) infer();
+    std::vector<double> times;
+    times.reserve(size_t(runs));
+    for (int i = 0; i < runs; ++i) {
+        auto start = std::chrono::steady_clock::now();
+        infer();
+        times.push_back(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count());
+    }
+    const double meanMs = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+    std::sort(times.begin(), times.end());
+    const double nominalOps = 2.0 * c.h * c.w * c.co * K * K * c.ci;
+    const double meanTops = nominalOps / (meanMs * 1e9);
+    const double fastestTops = nominalOps / (times.front() * 1e9);
+    std::printf("INT8_TOPS_PASS case=%s weights=%s shape=1x%ux%ux%u->%u "
+                "ops=%.3fG mean=%.4fms p50=%.4fms p95=%.4fms fastest=%.4fms "
+                "TOPS_mean=%.4f TOPS_fastest=%.4f\n",
+                c.name, perChannel ? "per_channel" : "per_tensor",
+                c.h, c.w, c.ci, c.co, nominalOps / 1e9, meanMs,
+                percentile(times, .5), percentile(times, .95), times.front(),
+                meanTops, fastestTops);
+    std::fflush(stdout);
+    return {meanTops, fastestTops};
+}
+
 int main(int argc, char** argv) {
     try {
-        // tops_bench [all|go19|small|medium|large|heavy] [mtk-mdla|mtk-dsp] [warmup] [runs]
-        if (argc > 5) throw std::runtime_error("Usage: neuron_tops_android [profile] [device] [warmup] [runs]");
+        // [profile] [mtk-mdla|mtk-dsp] [warmup] [runs] [fp16|int8]
+        if (argc > 6) throw std::runtime_error("Usage: neuron_tops_android [profile] [device] [warmup] [runs] [fp16|int8]");
         const std::string profile = argc > 1 ? argv[1] : "all";
         const std::string deviceName = argc > 2 ? argv[2] : "mtk-mdla";
         int warmup = argc > 3 ? std::stoi(argv[3]) : 20;
         int runs = argc > 4 ? std::stoi(argv[4]) : 100;
+        const std::string precision = argc > 5 ? argv[5] : "fp16";
+        if (precision != "fp16" && precision != "int8")
+            throw std::runtime_error("precision must be fp16 or int8");
         if (deviceName != "mtk-mdla" && deviceName != "mtk-dsp")
             throw std::runtime_error("Device must be mtk-mdla or mtk-dsp");
         if (warmup < 0 || warmup > 10000 || runs < 1 || runs > 10000)
@@ -302,8 +475,8 @@ int main(int argc, char** argv) {
 
         Neuron n;
         const NeuronDevice* device = n.choose(deviceName);
-        std::printf("PINNED_DEVICE=%s precision=FP16 warmup=%d runs=%d\n",
-                    deviceName.c_str(), warmup, runs);
+        std::printf("PINNED_DEVICE=%s precision=%s warmup=%d runs=%d\n",
+                    deviceName.c_str(), precision.c_str(), warmup, runs);
         double maxMean = 0, maxFastest = 0;
         int success = 0, failures = 0;
         for (const auto& c : cases) {
@@ -312,7 +485,19 @@ int main(int argc, char** argv) {
             std::printf("\nCASE_START %s\n", c.name);
             std::fflush(stdout);
             try {
-                Result r = runCase(n, device, c, warmup, runs);
+                Result r{};
+                if (precision == "fp16") {
+                    r = runCase(n, device, c, warmup, runs);
+                } else {
+                    try {
+                        std::puts("INT8 trying signed asymmetric activations with per-channel signed weights");
+                        r = runInt8Variant(n, device, c, warmup, runs, true);
+                    } catch (const std::exception& firstError) {
+                        std::fprintf(stderr, "INT8_PER_CHANNEL_FAIL case=%s reason=%s; trying per-tensor signed weights\n",
+                                     c.name, firstError.what());
+                        r = runInt8Variant(n, device, c, warmup, runs, false);
+                    }
+                }
                 maxMean = std::max(maxMean, r.meanTops);
                 maxFastest = std::max(maxFastest, r.fastestTops);
                 ++success;
@@ -321,10 +506,10 @@ int main(int argc, char** argv) {
                 ++failures;
             }
         }
-        std::printf("\nTOPS_SUMMARY device=%s successful=%d failed=%d "
-                    "best_mean_effective_FP16_TOPS=%.4f best_single_effective_FP16_TOPS=%.4f\n",
-                    deviceName.c_str(), success, failures, maxMean, maxFastest);
-        std::puts("WARNING: Model-equivalent FP16 CONV throughput, not rated chip peak/INT8 TOPS.");
+        std::printf("\nTOPS_SUMMARY device=%s precision=%s successful=%d failed=%d "
+                    "best_mean_effective_TOPS=%.4f best_single_effective_TOPS=%.4f\n",
+                    deviceName.c_str(), precision.c_str(), success, failures, maxMean, maxFastest);
+        std::puts("WARNING: Effective model-equivalent CONV throughput, NOT rated chip peak TOPS.");
         std::puts("Includes host-side synchronous Neuron API overhead; no per-NPU hardware counters.");
         std::puts("Pinned device rules out requested CPU fallback, but vendor-internal scheduling is opaque.");
         return failures || !success ? 1 : 0;
