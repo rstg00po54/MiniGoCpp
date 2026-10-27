@@ -262,3 +262,27 @@ RKNN_TOPS_MODEL=/path/to/generated_tops_heavy_int8.rknn CORE_MODES="0" bash MTK_
 也不意味着一个模型的 `all` 模式必然会比单核快。
 RKNN 新 INT8 图及 Android C++ 路径**目前尚未在实体 RK3588 上验证**，
 第一次请提供模型生成日志和 `RK_INT8_*` 输出；若编译失败不会报告假 TOPS。
+
+## RK3588 量化输入响应验证（2026-10-27）
+
+若旧版程序出现 `RK_INT8_TOPS_FAIL: RKNN output does not respond to changed input`，
+模型生成日志可能仍然正常，且编译器已经把 Conv 归入 NPU。
+
+修正后的 `tools/rk3588_tops_android.cpp` 不再依赖运行时将
+`NCHW FLOAT32` 隐式转换为模型的 `NHWC INT8`；它先根据
+`RKNN_QUERY_INPUT_ATTR` 返回的 scale、zero point、format 和 dtype
+直接量化和重排输入，绑定匹配原生输入格式的字节数据，随后执行 RKNN。
+
+`RK_INT8_INPUT_PACKING` 会显示所用输入类型/格式。
+`RK_INT8_RESPONSE_DIAG` 会对比两套输入的字节差异数、
+CPU 预期输出的平均变化和 NPU 实际输出的平均变化。
+只在准确性和输入响应校验通过后才显示 `RK_INT8_VERIFY_PASS`。
+如果仍然失败，应提供诊断输出，不要跳过校验后报 TOPS。
+
+**旧模型无需重新生成**。脚本发现本地 `.rknn` 缓存就会复用它；
+改动后的 C++ 源码会触发 NDK 重新编译：
+
+```bash
+git pull
+CORE_MODES="0" WARMUP=20 RUNS=100 bash MTK_NPU_Benchmark/run_tops.sh rk64 auto int8
+```
